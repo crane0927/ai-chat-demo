@@ -53,6 +53,7 @@ st.set_page_config(
 st.markdown(
     """
     <style>
+        /* 使用 Streamlit 主题变量，保证浅色和深色模式下都能保持可读。 */
         :root {
             --app-bg: var(--background-color);
             --panel-bg: var(--secondary-background-color);
@@ -213,6 +214,7 @@ st.markdown(
             box-sizing: border-box;
         }
 
+        /* 来源标签需要被限制在聊天卡片内部，避免长模型名撑破容器。 */
         .answer-source {
             display: inline-flex;
             align-items: center;
@@ -251,6 +253,7 @@ st.markdown(
             line-height: 1.35;
         }
 
+        /* 自定义内联问号，让提示位置贴近字段名，而不是右对齐到输入框边缘。 */
         .help-dot {
             display: inline-flex;
             align-items: center;
@@ -306,6 +309,7 @@ if "system_prompt_input" not in st.session_state:
     st.session_state.system_prompt_input = DEFAULT_SYSTEM_PROMPT
 
 
+# 回调会在 Streamlit 重建组件前执行，避免直接修改已实例化 widget key 的异常。
 def create_session() -> None:
     """
     新建会话按钮的回调，在组件重建前更新会话状态。
@@ -380,6 +384,7 @@ with st.sidebar:
     st.divider()
     st.subheader("提示词")
 
+    # 预览和编辑共用同一块区域，避免侧边栏同时出现两个提示词面板。
     preview_prompt = st.toggle(
         "预览 Markdown",
         value=False,
@@ -420,6 +425,7 @@ with st.sidebar:
     )
 
     # API Key 输入框（密码形式）
+    # Streamlit 原生 help 图标会右对齐；这里用自定义标签保持字段说明位置统一。
     st.markdown(
         """
         <div class="field-label">
@@ -497,6 +503,7 @@ def clean_model_messages(history: List[Dict[str, str]]) -> List[Dict[str, str]]:
     """
     发送给模型接口前，只保留 role 和 content 字段。
     """
+    # 会话里会保存 UI 元数据，例如 source；模型接口不接受这些额外字段。
     return [
         {"role": msg["role"], "content": msg["content"]}
         for msg in history
@@ -537,6 +544,7 @@ def render_assistant_message(content: str, source: Optional[str]) -> None:
     """
     将助手回答和来源合并在同一个 Markdown 块里渲染。
     """
+    # 合并渲染可以让来源标签留在同一个聊天气泡内部。
     st.markdown(f"{content}\n\n{answer_source_html(source)}", unsafe_allow_html=True)
 
 
@@ -578,6 +586,7 @@ def render_app_header(
 visible_messages = [msg for msg in messages if msg["role"] != "system"]
 mode_label = "模型接口" if use_openai else "本地回显"
 header_slot = st.empty()
+# 顶部状态需要在用户发送消息后即时重绘，所以先用占位容器承载。
 render_app_header(
     header_slot,
     st.session_state.active_session,
@@ -592,6 +601,7 @@ render_app_header(
 empty_state_slot = st.empty()
 
 if not visible_messages:
+    # 空状态同样用占位容器，发送第一条消息后可以立即清掉。
     empty_state_slot.markdown(
         """
         <div class="empty-state">
@@ -746,6 +756,7 @@ if prompt:
     # 3. 生成 AI 回复
     with st.chat_message("assistant"):
         if use_openai:
+            # 手动累积流式片段，结束后把来源标签追加到同一个消息块里。
             answer_box = st.empty()
             answer = ""
             for chunk in openai_stream_response(
@@ -770,6 +781,7 @@ if prompt:
         {"role": "assistant", "content": answer, "source": answer_source}
     )
 
+    # 消息数在本轮脚本执行中发生变化，立即重绘顶部统计。
     render_app_header(
         header_slot,
         st.session_state.active_session,
