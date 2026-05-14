@@ -306,6 +306,35 @@ if "system_prompt_input" not in st.session_state:
     st.session_state.system_prompt_input = DEFAULT_SYSTEM_PROMPT
 
 
+def create_session() -> None:
+    """
+    新建会话按钮的回调，在组件重建前更新会话状态。
+    """
+    index = 1
+    while f"会话 {index}" in st.session_state.sessions:
+        index += 1
+
+    new_name = f"会话 {index}"
+    st.session_state.sessions[new_name] = [
+        {"role": "system", "content": DEFAULT_SYSTEM_PROMPT}
+    ]
+    st.session_state.active_session = new_name
+    st.session_state.system_prompt_input = DEFAULT_SYSTEM_PROMPT
+
+
+def delete_active_session() -> None:
+    """
+    删除当前会话按钮的回调，在组件重建前更新会话状态。
+    """
+    if len(st.session_state.sessions) <= 1:
+        return
+
+    del st.session_state.sessions[st.session_state.active_session]
+    st.session_state.active_session = list(st.session_state.sessions.keys())[0]
+    current_system = st.session_state.sessions[st.session_state.active_session][0]["content"]
+    st.session_state.system_prompt_input = current_system
+
+
 # ======== 侧边栏设置区域 ========
 
 with st.sidebar:
@@ -332,25 +361,19 @@ with st.sidebar:
     col_new, col_del = st.columns(2)
 
     with col_new:
-        if st.button("新建", use_container_width=True):
-            index = 1
-            while f"会话 {index}" in st.session_state.sessions:
-                index += 1
-            new_name = f"会话 {index}"
-            st.session_state.sessions[new_name] = [
-                {"role": "system", "content": DEFAULT_SYSTEM_PROMPT}
-            ]
-            st.session_state.active_session = new_name
-            st.session_state.system_prompt_input = DEFAULT_SYSTEM_PROMPT
-            st.rerun()
+        st.button(
+            "新建",
+            use_container_width=True,
+            on_click=create_session,
+        )
 
     with col_del:
-        if st.button("删除", disabled=len(st.session_state.sessions) <= 1, use_container_width=True):
-            del st.session_state.sessions[st.session_state.active_session]
-            st.session_state.active_session = list(st.session_state.sessions.keys())[0]
-            current_system = st.session_state.sessions[st.session_state.active_session][0]["content"]
-            st.session_state.system_prompt_input = current_system
-            st.rerun()
+        st.button(
+            "删除",
+            disabled=len(st.session_state.sessions) <= 1,
+            use_container_width=True,
+            on_click=delete_active_session,
+        )
 
     st.caption(f"当前共有 {len(st.session_state.sessions)} 个会话。")
 
