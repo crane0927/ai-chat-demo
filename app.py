@@ -323,7 +323,7 @@ with st.sidebar:
     # 预览和编辑共用同一块区域，避免侧边栏同时出现两个提示词面板。
     preview_prompt = st.toggle(
         "预览 Markdown",
-        value=False,
+        value=True,
     )
     st.caption("系统提示词支持 Markdown，可编写角色、规则、列表和示例。")
 
@@ -359,7 +359,7 @@ with st.sidebar:
         use_openai = st.checkbox(
             "使用 OpenAI 接口",
             value=False,
-            help="需要配置 OPENAI_API_KEY。未启用时使用本地回显。"
+            # help="需要配置 OPENAI_API_KEY。未启用时使用本地回显。"
         )
 
         api_key_input = st.text_input(
