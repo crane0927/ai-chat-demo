@@ -1,45 +1,27 @@
-# ======== Python 标准库 ========
-
-import os
-# os 模块：用来读取系统环境变量，比如 OPENAI_API_KEY
-
-from html import escape
-# escape 函数：把用户输入转义后再放进 HTML，避免破坏页面结构
-
-
-# ======== 类型提示（不影响运行，只是帮助理解） ========
-
-from typing import Dict, List, Optional
-# Dict[str, str]   表示字典：key 和 value 都是字符串
-# List[...]        表示列表
-# Optional[str]    表示：要么是 str，要么是 None
-
-
 # ======== 第三方库：Streamlit ========
 
 import streamlit as st
 # streamlit 是用来快速写 Web 页面（特别适合 AI Demo）
 
 
-# ======== 尝试导入 OpenAI SDK（防止没安装时报错） ========
+# ======== 应用模块 ========
 
-try:
-    # OpenAI：客户端对象
-    # AuthenticationError：鉴权失败异常
-    from openai import AuthenticationError, OpenAI
-except Exception:
-    # 如果 openai 库没安装，就使用本地回显模式，防止程序直接崩溃
-    OpenAI = None
-    AuthenticationError = None
-
-
-# ======== 一些“常量配置” ========
-
-APP_TITLE = "AI 助理"
-# 页面标题
-
-DEFAULT_SYSTEM_PROMPT = "你叫困困，是一个 AI 助理，请使用可爱活泼的语气回复用户的问题。"
-# 默认系统提示词（system role）
+from config import APP_TITLE, get_env_api_key, get_env_base_url, get_env_chat_model
+from services.llm import (
+    get_answer_source,
+    local_fallback_response,
+    openai_stream_response,
+)
+from services.session import (
+    create_session,
+    delete_active_session,
+    get_current_messages,
+    get_current_system_prompt,
+    init_session_state,
+    sync_system_prompt,
+    visible_messages as get_visible_messages,
+)
+from ui.components import answer_source_html, render_app_header, render_assistant_message
 
 
 # ======== Streamlit 页面基础设置 ========
@@ -295,48 +277,7 @@ st.markdown(
 
 # ======== 会话管理（多会话） ========
 
-if "sessions" not in st.session_state:
-    st.session_state.sessions = {
-        "会话 1": [
-            {"role": "system", "content": DEFAULT_SYSTEM_PROMPT}
-        ]
-    }
-
-if "active_session" not in st.session_state:
-    st.session_state.active_session = "会话 1"
-
-if "system_prompt_input" not in st.session_state:
-    st.session_state.system_prompt_input = DEFAULT_SYSTEM_PROMPT
-
-
-# 回调会在 Streamlit 重建组件前执行，避免直接修改已实例化 widget key 的异常。
-def create_session() -> None:
-    """
-    新建会话按钮的回调，在组件重建前更新会话状态。
-    """
-    index = 1
-    while f"会话 {index}" in st.session_state.sessions:
-        index += 1
-
-    new_name = f"会话 {index}"
-    st.session_state.sessions[new_name] = [
-        {"role": "system", "content": DEFAULT_SYSTEM_PROMPT}
-    ]
-    st.session_state.active_session = new_name
-    st.session_state.system_prompt_input = DEFAULT_SYSTEM_PROMPT
-
-
-def delete_active_session() -> None:
-    """
-    删除当前会话按钮的回调，在组件重建前更新会话状态。
-    """
-    if len(st.session_state.sessions) <= 1:
-        return
-
-    del st.session_state.sessions[st.session_state.active_session]
-    st.session_state.active_session = list(st.session_state.sessions.keys())[0]
-    current_system = st.session_state.sessions[st.session_state.active_session][0]["content"]
-    st.session_state.system_prompt_input = current_system
+init_session_state(st.session_state)
 
 
 # ======== 侧边栏设置区域 ========
@@ -359,8 +300,7 @@ with st.sidebar:
     )
 
     if st.session_state.active_session != previous_session:
-        current_system = st.session_state.sessions[st.session_state.active_session][0]["content"]
-        st.session_state.system_prompt_input = current_system
+        st.session_state.system_prompt_input = get_current_system_prompt(st.session_state)
 
     col_new, col_del = st.columns(2)
 
@@ -369,6 +309,7 @@ with st.sidebar:
             "新建",
             use_container_width=True,
             on_click=create_session,
+            args=(st.session_state,),
         )
 
     with col_del:
@@ -377,6 +318,7 @@ with st.sidebar:
             disabled=len(st.session_state.sessions) <= 1,
             use_container_width=True,
             on_click=delete_active_session,
+            args=(st.session_state,),
         )
 
     st.caption(f"当前共有 {len(st.session_state.sessions)} 个会话。")
@@ -438,7 +380,7 @@ with st.sidebar:
     api_key_input = st.text_input(
         "OpenAI API Key",
         type="password",
-        value=os.getenv("OPENAI_API_KEY", ""),
+        value=get_env_api_key(),
         placeholder="sk-xxxxxx",
         label_visibility="collapsed"
     )
@@ -455,7 +397,7 @@ with st.sidebar:
     )
     base_url = st.text_input(
         "Base URL",
-        value=os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com"),
+        value=get_env_base_url(),
         placeholder="https://api.deepseek.com",
         label_visibility="collapsed"
     )
@@ -472,7 +414,7 @@ with st.sidebar:
     )
     model_name = st.text_input(
         "模型",
-        value=os.getenv("OPENAI_CHAT_MODEL", "deepseek-chat"),
+        value=get_env_chat_model(),
         label_visibility="collapsed"
     )
 
@@ -488,102 +430,17 @@ with st.sidebar:
 
 # ======== 当前会话消息 ========
 
-messages = st.session_state.sessions[st.session_state.active_session]
+messages = get_current_messages(st.session_state)
 
 
 # ======== 同步 system prompt（侧边栏修改后生效） ========
 
-if messages and messages[0].get("role") == "system":
-    messages[0]["content"] = system_prompt
-
-
-# ======== 消息展示与模型调用辅助函数 ========
-
-def clean_model_messages(history: List[Dict[str, str]]) -> List[Dict[str, str]]:
-    """
-    发送给模型接口前，只保留 role 和 content 字段。
-    """
-    # 会话里会保存 UI 元数据，例如 source；模型接口不接受这些额外字段。
-    return [
-        {"role": msg["role"], "content": msg["content"]}
-        for msg in history
-        if msg.get("role") in {"system", "user", "assistant"}
-    ]
-
-
-def get_answer_source(
-    enabled_openai: bool,
-    api_key: Optional[str],
-    model: str,
-) -> str:
-    """
-    根据当前配置生成回答来源标注。
-    """
-    if not enabled_openai:
-        return "本地回显"
-
-    if OpenAI is None:
-        return "本地回显 · 未安装 openai"
-
-    current_api_key = (api_key or "").strip() or os.getenv("OPENAI_API_KEY", "").strip()
-    if not current_api_key:
-        return "本地回显 · 未配置密钥"
-
-    return f"模型接口 · {model.strip() or '未设置模型'}"
-
-
-def answer_source_html(source: Optional[str]) -> str:
-    """
-    生成助手回答来源标注。
-    """
-    safe_source = escape(source or "未知来源")
-    return f'<div class="answer-source-row"><span class="answer-source">回答来源：{safe_source}</span></div>'
-
-
-def render_assistant_message(content: str, source: Optional[str]) -> None:
-    """
-    将助手回答和来源合并在同一个 Markdown 块里渲染。
-    """
-    # 合并渲染可以让来源标签留在同一个聊天气泡内部。
-    st.markdown(f"{content}\n\n{answer_source_html(source)}", unsafe_allow_html=True)
-
-
-def render_app_header(
-    container,
-    session_name: str,
-    mode: str,
-    model: str,
-    message_count: int,
-) -> None:
-    """
-    渲染顶部状态区域。
-    """
-    safe_session_name = escape(session_name)
-    safe_model_name = escape(model.strip() or "未设置模型")
-    safe_mode_label = escape(mode)
-
-    container.markdown(
-        f"""
-        <section class="app-hero">
-            <div>
-                <p class="app-kicker">AI Chat Demo</p>
-                <h1 class="app-title">{APP_TITLE}</h1>
-                <p class="app-subtitle">当前会话：{safe_session_name}</p>
-            </div>
-            <div class="status-strip">
-                <span class="status-pill"><strong>{safe_mode_label}</strong></span>
-                <span class="status-pill">{safe_model_name}</span>
-                <span class="status-pill">{message_count} 条消息</span>
-            </div>
-        </section>
-        """,
-        unsafe_allow_html=True
-    )
+sync_system_prompt(messages, system_prompt)
 
 
 # ======== 顶部状态区域 ========
 
-visible_messages = [msg for msg in messages if msg["role"] != "system"]
+visible_messages = get_visible_messages(messages)
 mode_label = "模型接口" if use_openai else "本地回显"
 header_slot = st.empty()
 # 顶部状态需要在用户发送消息后即时重绘，所以先用占位容器承载。
@@ -627,117 +484,6 @@ for msg in visible_messages:
 prompt = st.chat_input("请输入你的问题...")
 
 
-# ======== 本地回显模式（未配置 API Key） ========
-
-def local_fallback_response(user_text: str) -> str:
-    """
-    本地兜底响应函数
-    当不使用 OpenAI 接口时调用
-    """
-    if "你好" in user_text:
-        return "你好呀～，我是困困，一个超级可爱的AI小助手！✨ 今天有什么可以帮你的吗？"
-    return (
-        f"我收到了你的消息：{user_text}\n\n"
-        f"当前未配置 OpenAI 密钥，所以这里是本地回显模式。"
-    )
-
-
-# ======== 调用 OpenAI / 兼容接口的函数 ========
-
-def openai_response(
-    history: List[Dict[str, str]],  # 聊天历史
-    temp: float,                    # 温度
-    api_key: Optional[str],         # API Key
-    model: str,                     # 模型名
-    base_url: Optional[str],        # Base URL
-) -> str:
-
-    # 如果 openai 库没安装
-    if OpenAI is None:
-        return "未安装 openai 依赖，已切换为本地回显模式。"
-
-    # API Key 优先级：输入框 > 环境变量
-    api_key = (api_key or "").strip() or os.getenv("OPENAI_API_KEY", "").strip()
-
-    if not api_key:
-        return "未检测到 OPENAI_API_KEY，已切换为本地回显模式。"
-
-    # Base URL 如果为空字符串，就设为 None
-    base_url = (base_url or "").strip() or None
-
-    # 创建 OpenAI 客户端
-    client = OpenAI(
-        api_key=api_key,
-        base_url=base_url
-    )
-
-    try:
-        # 发送聊天请求
-        resp = client.chat.completions.create(
-            model=model,
-            messages=clean_model_messages(history),
-            temperature=temp,
-        )
-
-        # 返回模型回复内容
-        return resp.choices[0].message.content or ""
-
-    except Exception as exc:
-        # 鉴权失败（401）
-        if AuthenticationError is not None and isinstance(exc, AuthenticationError):
-            return f"鉴权失败（401）：{exc}"
-
-        # 其他错误
-        return f"请求失败：{type(exc).__name__} - {exc}"
-
-
-# ======== 调用 OpenAI / 兼容接口（流式输出） ========
-
-def openai_stream_response(
-    history: List[Dict[str, str]],
-    temp: float,
-    api_key: Optional[str],
-    model: str,
-    base_url: Optional[str],
-):
-    """
-    流式响应生成器
-    每次 yield 一段增量文本
-    """
-    if OpenAI is None:
-        yield "未安装 openai 依赖，已切换为本地回显模式。"
-        return
-
-    api_key = (api_key or "").strip() or os.getenv("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        yield "未检测到 OPENAI_API_KEY，已切换为本地回显模式。"
-        return
-
-    base_url = (base_url or "").strip() or None
-
-    client = OpenAI(
-        api_key=api_key,
-        base_url=base_url
-    )
-
-    try:
-        stream = client.chat.completions.create(
-            model=model,
-            messages=clean_model_messages(history),
-            temperature=temp,
-            stream=True,
-        )
-        for event in stream:
-            delta = event.choices[0].delta.content
-            if delta:
-                yield delta
-    except Exception as exc:
-        if AuthenticationError is not None and isinstance(exc, AuthenticationError):
-            yield f"鉴权失败（401）：{exc}"
-            return
-        yield f"请求失败：{type(exc).__name__} - {exc}"
-
-
 # ======== 主聊天逻辑 ========
 
 if prompt:
@@ -768,10 +514,8 @@ if prompt:
             ):
                 answer += chunk
                 answer_box.markdown(answer)
-            answer_box.markdown(
-                f"{answer}\n\n{answer_source_html(answer_source)}",
-                unsafe_allow_html=True
-            )
+            answer_box.markdown(answer)
+            st.markdown(answer_source_html(answer_source), unsafe_allow_html=True)
         else:
             answer = local_fallback_response(prompt)
             render_assistant_message(answer, answer_source)

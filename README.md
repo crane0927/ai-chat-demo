@@ -16,7 +16,13 @@
 
 ```text
 .
-├── app.py              # Streamlit 应用入口
+├── app.py              # Streamlit 应用入口和页面编排
+├── config.py           # 默认配置和环境变量读取
+├── services/
+│   ├── llm.py          # 模型调用、本地回显和消息清洗
+│   └── session.py      # 会话状态管理
+├── ui/
+│   └── components.py   # 页面组件渲染函数
 ├── requirements.txt    # Python 依赖
 └── README.md           # 项目说明
 ```
