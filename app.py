@@ -234,30 +234,14 @@ st.markdown(
             border: 1px solid var(--panel-border);
         }
 
-        .field-label {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.35rem;
-            margin: 0 0 0.35rem;
-            color: var(--text-main);
-            font-size: 0.87rem;
-            font-weight: 500;
-            line-height: 1.35;
+        div[data-testid="stCheckbox"] {
+            position: relative;
         }
 
-        /* 自定义内联问号，让提示位置贴近字段名，而不是右对齐到输入框边缘。 */
-        .help-dot {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 0.95rem;
-            height: 0.95rem;
-            border: 1px solid var(--panel-border);
-            border-radius: 999px;
-            color: var(--text-muted);
-            font-size: 0.68rem;
-            font-weight: 700;
-            cursor: help;
+        div[data-testid="stCheckbox"] [id$="__anchor"] {
+            position: absolute;
+            top: 0.12rem;
+            right: 0;
         }
 
         @media (max-width: 760px) {
@@ -360,73 +344,44 @@ with st.sidebar:
     st.divider()
     st.subheader("模型")
 
-    # temperature 滑块（控制模型随机性）
-    temperature = st.slider(
-        "温度",
-        0.0,    # 最小值
-        1.0,    # 最大值
-        0.7,    # 默认值
-        0.1     # 步长
-    )
+    with st.expander("普通参数", expanded=True):
+        # temperature 滑块（控制模型随机性）
+        temperature = st.slider(
+            "温度",
+            0.0,    # 最小值
+            1.0,    # 最大值
+            0.7,    # 默认值
+            0.1,    # 步长
+            help="控制模型回复的随机性，数值越高越发散。"
+        )
 
-    # 是否使用 OpenAI 接口
-    use_openai = st.checkbox(
-        "使用 OpenAI 接口",
-        value=False,
-        help="需要配置 OPENAI_API_KEY。未启用时使用本地回显。"
-    )
+        # 是否使用 OpenAI 接口
+        use_openai = st.checkbox(
+            "使用 OpenAI 接口",
+            value=False,
+            help="需要配置 OPENAI_API_KEY。未启用时使用本地回显。"
+        )
 
-    # API Key 输入框（密码形式）
-    # Streamlit 原生 help 图标会右对齐；这里用自定义标签保持字段说明位置统一。
-    st.markdown(
-        """
-        <div class="field-label">
-            OpenAI API Key
-            <span class="help-dot" title="可选。页面输入的 API Key 优先于环境变量 OPENAI_API_KEY。">?</span>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    api_key_input = st.text_input(
-        "OpenAI API Key",
-        type="password",
-        value=get_env_api_key(),
-        placeholder="sk-xxxxxx",
-        label_visibility="collapsed"
-    )
+        api_key_input = st.text_input(
+            "OpenAI API Key",
+            type="password",
+            value=get_env_api_key(),
+            placeholder="sk-xxxxxx",
+            help="可选。页面输入的 API Key 优先于环境变量 OPENAI_API_KEY。"
+        )
 
-    # Base URL（支持第三方 OpenAI 兼容接口，如 DeepSeek）
-    st.markdown(
-        """
-        <div class="field-label">
-            Base URL
-            <span class="help-dot" title="可选，用于第三方兼容 OpenAI 接口，如 DeepSeek。">?</span>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    base_url = st.text_input(
-        "Base URL",
-        value=get_env_base_url(),
-        placeholder="https://api.deepseek.com",
-        label_visibility="collapsed"
-    )
+        base_url = st.text_input(
+            "Base URL",
+            value=get_env_base_url(),
+            placeholder="https://api.deepseek.com",
+            help="可选，用于第三方兼容 OpenAI 接口，如 DeepSeek。"
+        )
 
-    # 模型名称
-    st.markdown(
-        """
-        <div class="field-label">
-            模型
-            <span class="help-dot" title="也可通过环境变量 OPENAI_CHAT_MODEL 设置。">?</span>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    model_name = st.text_input(
-        "模型",
-        value=get_env_chat_model(),
-        label_visibility="collapsed"
-    )
+        model_name = st.text_input(
+            "模型",
+            value=get_env_chat_model(),
+            help="聊天模型名称，也可通过环境变量 OPENAI_CHAT_MODEL 设置。"
+        )
 
     with st.expander("高级参数"):
         max_tokens = st.number_input(
