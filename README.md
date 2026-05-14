@@ -1,0 +1,111 @@
+# AI Chat Demo
+
+一个基于 Streamlit 构建的 AI 聊天演示项目，支持本地回显模式和 OpenAI 兼容接口调用。项目默认适配 DeepSeek 的 OpenAI 兼容接口，也可以通过环境变量或页面输入框切换到其他兼容服务。
+
+## 功能特性
+
+- 基于 Streamlit 的简洁聊天界面
+- 支持多会话创建、切换和删除
+- 支持自定义系统提示词
+- 支持调整 temperature 参数
+- 支持 OpenAI SDK 流式输出
+- 支持 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_CHAT_MODEL` 环境变量
+- 未启用接口或未安装依赖时，可使用本地回显模式
+
+## 项目结构
+
+```text
+.
+├── app.py              # Streamlit 应用入口
+├── requirements.txt    # Python 依赖
+└── README.md           # 项目说明
+```
+
+## 环境要求
+
+- Python 3.9 或更高版本
+- pip
+
+## 安装依赖
+
+建议先创建虚拟环境：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+安装项目依赖：
+
+```bash
+pip install -r requirements.txt
+```
+
+## 运行项目
+
+```bash
+streamlit run app.py
+```
+
+启动后，终端会显示本地访问地址，通常是：
+
+```text
+http://localhost:8501
+```
+
+## 使用本地回显模式
+
+默认情况下，侧边栏中的“使用 OpenAI 接口（需要 OPENAI_API_KEY）”未勾选。此时应用不会请求外部模型接口，而是返回本地回显内容，适合快速验证页面是否正常运行。
+
+## 使用模型接口
+
+如需调用 OpenAI 或 OpenAI 兼容接口，请先配置 API Key。
+
+方式一：通过环境变量配置：
+
+```bash
+export OPENAI_API_KEY="你的 API Key"
+export OPENAI_BASE_URL="https://api.deepseek.com"
+export OPENAI_CHAT_MODEL="deepseek-chat"
+streamlit run app.py
+```
+
+方式二：在页面侧边栏中填写：
+
+- `OpenAI API Key`
+- `Base URL`
+- `模型`
+
+然后勾选“使用 OpenAI 接口（需要 OPENAI_API_KEY）”。
+
+## 常用配置
+
+| 配置项 | 说明 | 默认值 |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | 模型接口密钥 | 空 |
+| `OPENAI_BASE_URL` | OpenAI 兼容接口地址 | `https://api.deepseek.com` |
+| `OPENAI_CHAT_MODEL` | 聊天模型名称 | `deepseek-chat` |
+
+## 常见问题
+
+### 未配置 API Key 能运行吗？
+
+可以。未勾选“使用 OpenAI 接口”时，应用会使用本地回显模式，不需要 API Key。
+
+### 为什么勾选接口后返回鉴权失败？
+
+通常是 API Key 无效、Base URL 不正确，或者模型名称与服务商不匹配。请检查侧边栏配置或环境变量。
+
+### 聊天记录会保存吗？
+
+当前聊天记录保存在 Streamlit 的会话状态中。刷新页面、关闭浏览器或重启服务后，记录可能丢失。项目暂未提供数据库或文件持久化能力。
+
+## 开发建议
+
+如果后续继续扩展，可以考虑：
+
+- 拆分模型调用、会话管理和页面逻辑
+- 增加 `.env` 配置加载
+- 增加聊天记录持久化
+- 增加模型请求超时、重试和更友好的错误提示
+- 补充基础测试和代码格式化工具
