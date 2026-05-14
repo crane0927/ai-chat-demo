@@ -6,8 +6,18 @@ import streamlit as st
 
 # ======== 应用模块 ========
 
-from config import APP_TITLE, get_env_api_key, get_env_base_url, get_env_chat_model
+from config import (
+    APP_TITLE,
+    get_env_api_key,
+    get_env_base_url,
+    get_env_chat_model,
+    get_env_context_messages,
+    get_env_max_retries,
+    get_env_max_tokens,
+    get_env_timeout_seconds,
+)
 from services.llm import (
+    ModelRequestOptions,
     get_answer_source,
     local_fallback_response,
     openai_stream_response,
@@ -418,6 +428,43 @@ with st.sidebar:
         label_visibility="collapsed"
     )
 
+    with st.expander("高级参数"):
+        max_tokens = st.number_input(
+            "最大输出 Token",
+            min_value=1,
+            max_value=32000,
+            value=get_env_max_tokens(),
+            step=256,
+            help="限制单次回复的最大输出长度。"
+        )
+
+        context_message_limit = st.number_input(
+            "上下文消息数",
+            min_value=1,
+            max_value=200,
+            value=get_env_context_messages(),
+            step=2,
+            help="发送给模型时保留最近多少条用户/助手消息，系统提示词会始终保留。"
+        )
+
+        timeout_seconds = st.number_input(
+            "请求超时（秒）",
+            min_value=1.0,
+            max_value=300.0,
+            value=get_env_timeout_seconds(),
+            step=5.0,
+            help="模型服务超过该时间未响应时中断请求。"
+        )
+
+        max_retries = st.number_input(
+            "自动重试次数",
+            min_value=0,
+            max_value=10,
+            value=get_env_max_retries(),
+            step=1,
+            help="网络抖动、限流等可重试错误由 OpenAI SDK 自动重试。"
+        )
+
     st.markdown(
         """
         <div class="sidebar-note">
@@ -488,6 +535,12 @@ prompt = st.chat_input("请输入你的问题...")
 
 if prompt:
     answer_source = get_answer_source(use_openai, api_key_input, model_name)
+    model_options = ModelRequestOptions(
+        max_tokens=int(max_tokens),
+        context_message_limit=int(context_message_limit),
+        timeout_seconds=float(timeout_seconds),
+        max_retries=int(max_retries),
+    )
     empty_state_slot.empty()
 
     # 1. 记录用户消息
@@ -511,6 +564,7 @@ if prompt:
                 api_key_input,
                 model_name,
                 base_url,
+                model_options,
             ):
                 answer += chunk
                 answer_box.markdown(answer)

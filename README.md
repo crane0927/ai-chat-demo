@@ -8,8 +8,9 @@
 - 支持多会话创建、切换和删除
 - 支持自定义系统提示词
 - 支持调整 temperature 参数
+- 支持最大输出 Token、上下文消息数、请求超时和自动重试配置
 - 支持 OpenAI SDK 流式输出
-- 支持 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_CHAT_MODEL` 环境变量
+- 支持 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_CHAT_MODEL` 等环境变量
 - 未启用接口或未安装依赖时，可使用本地回显模式
 
 ## 项目结构
@@ -73,6 +74,10 @@ http://localhost:8501
 export OPENAI_API_KEY="你的 API Key"
 export OPENAI_BASE_URL="https://api.deepseek.com"
 export OPENAI_CHAT_MODEL="deepseek-chat"
+export OPENAI_MAX_TOKENS="2048"
+export OPENAI_CONTEXT_MESSAGES="20"
+export OPENAI_TIMEOUT_SECONDS="60"
+export OPENAI_MAX_RETRIES="2"
 streamlit run app.py
 ```
 
@@ -81,6 +86,7 @@ streamlit run app.py
 - `OpenAI API Key`
 - `Base URL`
 - `模型`
+- 高级参数：最大输出 Token、上下文消息数、请求超时、自动重试次数
 
 然后勾选“使用 OpenAI 接口（需要 OPENAI_API_KEY）”。
 
@@ -91,6 +97,10 @@ streamlit run app.py
 | `OPENAI_API_KEY` | 模型接口密钥 | 空 |
 | `OPENAI_BASE_URL` | OpenAI 兼容接口地址 | `https://api.deepseek.com` |
 | `OPENAI_CHAT_MODEL` | 聊天模型名称 | `deepseek-chat` |
+| `OPENAI_MAX_TOKENS` | 单次回复最大输出 Token | `2048` |
+| `OPENAI_CONTEXT_MESSAGES` | 发送给模型的最近上下文消息数，不含系统提示词 | `20` |
+| `OPENAI_TIMEOUT_SECONDS` | 模型请求超时时间，单位秒 | `60` |
+| `OPENAI_MAX_RETRIES` | SDK 自动重试次数 | `2` |
 
 ## 常见问题
 
