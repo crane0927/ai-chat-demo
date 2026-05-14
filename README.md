@@ -24,6 +24,8 @@
 │   └── session.py      # 会话状态管理
 ├── ui/
 │   └── components.py   # 页面组件渲染函数
+├── docs/
+│   └── remaining-optimizations.md # 剩余优化与功能拓展清单
 ├── requirements.txt    # Python 依赖
 └── README.md           # 项目说明
 ```
@@ -118,10 +120,4 @@ streamlit run app.py
 
 ## 开发建议
 
-如果后续继续扩展，可以考虑：
-
-- 拆分模型调用、会话管理和页面逻辑
-- 增加 `.env` 配置加载
-- 增加聊天记录持久化
-- 增加模型请求超时、重试和更友好的错误提示
-- 补充基础测试和代码格式化工具
+后续优化和功能拓展已整理到 `docs/remaining-optimizations.md`。
