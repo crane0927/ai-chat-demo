@@ -40,12 +40,14 @@ from services.session import (
     build_model_messages,
     create_session,
     delete_session,
+    ensure_session_model_config,
     ensure_default_session,
     get_session,
     init_session_db,
     list_session_messages,
     list_sessions,
     rename_session,
+    update_session_model_config,
     update_session_system_prompt,
     visible_messages as get_visible_messages,
 )
@@ -385,12 +387,16 @@ st.markdown(
 
 database_url = get_database_url()
 try:
-    init_session_db(database_url)
-    ensure_default_session(database_url)
     init_model_config_db(database_url)
     ensure_default_model_config(database_url, get_env_api_key())
-    sessions = list_sessions(database_url)
     model_configs = list_model_configs(database_url)
+    model_configs_by_id = {config.id: config for config in model_configs}
+    default_model_config = model_configs[0] if model_configs else None
+    init_session_db(database_url)
+    ensure_default_session(database_url, default_model_config.id if default_model_config else None)
+    if default_model_config is not None:
+        ensure_session_model_config(database_url, default_model_config.id)
+    sessions = list_sessions(database_url)
 except SessionStorageError as exc:
     st.error(f"聊天记录数据库不可用：{exc}")
     st.info("请确认 PostgreSQL 已启动，并设置 APP_DATABASE_URL 或 DATABASE_URL。")
@@ -402,7 +408,6 @@ except ModelConfigStorageError as exc:
     st.stop()
 
 sessions_by_id = {session.id: session for session in sessions}
-model_configs_by_id = {config.id: config for config in model_configs}
 
 if "active_session_id" not in st.session_state or st.session_state.active_session_id not in sessions_by_id:
     # 会话删除或首次访问时，默认指向最近更新的一条会话。
@@ -429,38 +434,33 @@ elif st.session_state.active_session_selector_id != st.session_state.active_sess
     # 会话切换来自侧边栏下拉框；这里先同步到全局当前会话，再由后续逻辑更新提示词和消息内容。
     st.session_state.active_session_id = st.session_state.active_session_selector_id
 
-if (
-    "selected_model_config_id" not in st.session_state
-    or st.session_state.selected_model_config_id not in model_configs_by_id
-):
-    # 当前选择可能来自上一轮页面状态；配置被删除后需要回退到第一条可用配置。
-    st.session_state.selected_model_config_id = model_configs[0].id if model_configs else None
-
-pending_model_config_id = st.session_state.pop("pending_selected_model_config_id", None)
-if pending_model_config_id in model_configs_by_id:
-    # 表单提交后不能在同一轮修改已实例化的小组件 key，因此把切换动作延迟到下一轮脚本执行。
-    st.session_state.selected_model_config_id = pending_model_config_id
-
-if (
-    "selected_model_config_selector_id" not in st.session_state
-    or st.session_state.selected_model_config_selector_id not in model_configs_by_id
-):
-    st.session_state.selected_model_config_selector_id = st.session_state.selected_model_config_id
-elif st.session_state.selected_model_config_selector_id != st.session_state.selected_model_config_id:
-    # 模型下拉切换通常发生在设置弹窗里，但交互后会触发整页重跑；这里把弹窗选择同步回全局当前模型。
-    st.session_state.selected_model_config_id = st.session_state.selected_model_config_selector_id
-
 if "delete_model_config_confirming_id" not in st.session_state:
     st.session_state.delete_model_config_confirming_id = None
 
-selected_model_config = model_configs_by_id[st.session_state.selected_model_config_id]
 current_session = sessions_by_id.get(st.session_state.active_session_id)
 current_preview_prompt = st.session_state.get("preview_prompt", True)
 previous_preview_prompt = st.session_state.get("previous_preview_prompt", current_preview_prompt)
 
+if "create_session_confirming" not in st.session_state:
+    st.session_state.create_session_confirming = False
+
 if current_session is None:
     st.error("未找到当前会话，请刷新页面重试。")
     st.stop()
+
+if current_session.model_config_id not in model_configs_by_id:
+    default_model_config = model_configs[0] if model_configs else None
+    if default_model_config is None:
+        st.error("未找到可用模型配置，请先在设置中创建模型。")
+        st.stop()
+    try:
+        update_session_model_config(database_url, current_session.id, default_model_config.id)
+        current_session = get_session(database_url, current_session.id) or current_session
+    except SessionStorageError as exc:
+        st.error(f"初始化会话模型失败：{exc}")
+        st.stop()
+
+selected_model_config = model_configs_by_id[current_session.model_config_id]
 
 legacy_system_prompt_input = st.session_state.pop("system_prompt_input", "")
 
@@ -556,6 +556,39 @@ if st.session_state.rename_session_confirming_id in sessions_by_id:
     render_rename_session_dialog(st.session_state.rename_session_confirming_id)
 
 
+@st.dialog("新建会话", width="small")
+def render_create_session_dialog() -> None:
+    with st.form("create_session_form"):
+        new_session_title = st.text_input("会话名称", placeholder="留空则自动生成")
+        new_session_model_config_id = st.selectbox(
+            "选择模型",
+            list(model_configs_by_id.keys()),
+            format_func=lambda config_id: model_config_label(model_configs_by_id[config_id]),
+        )
+        submitted = st.form_submit_button("创建会话", use_container_width=True)
+
+    if submitted:
+        try:
+            new_session_id = create_session(
+                database_url,
+                title=new_session_title,
+                model_config_id=new_session_model_config_id,
+            )
+            st.session_state.pending_active_session_id = new_session_id
+            st.session_state.create_session_confirming = False
+            st.rerun()
+        except SessionStorageError as exc:
+            st.error(f"创建失败：{exc}")
+
+    if st.button("取消", key="cancel_create_session", use_container_width=True):
+        st.session_state.create_session_confirming = False
+        st.rerun()
+
+
+if st.session_state.create_session_confirming:
+    render_create_session_dialog()
+
+
 @st.dialog("设置", width="large")
 def render_settings_dialog() -> None:
     prompt_tab, model_tab = st.tabs(["提示词", "模型"])
@@ -592,13 +625,22 @@ def render_settings_dialog() -> None:
     with model_tab:
         st.subheader("模型")
 
+        session_model_selector_key = f"session_model_selector_{current_session.id}"
         selected_model_config_id = st.selectbox(
-            "当前模型配置",
+            "当前会话使用的模型",
             list(model_configs_by_id.keys()),
-            key="selected_model_config_selector_id",
+            index=list(model_configs_by_id.keys()).index(current_session.model_config_id),
+            key=session_model_selector_key,
             format_func=lambda config_id: model_config_label(model_configs_by_id[config_id]),
-            help="切换后，下一次提问会使用所选模型配置。",
+            help="每个会话会单独记住自己的模型配置。",
         )
+        if selected_model_config_id != current_session.model_config_id:
+            try:
+                update_session_model_config(database_url, current_session.id, selected_model_config_id)
+                st.rerun()
+            except SessionStorageError as exc:
+                st.error(f"切换模型失败：{exc}")
+
         current_config = model_configs_by_id[selected_model_config_id]
         st.caption(
             f"服务商：{current_config.provider or '未设置'} · "
@@ -775,8 +817,7 @@ def render_settings_dialog() -> None:
                                 True,
                             ),
                         )
-                        st.session_state.pending_selected_model_config_id = new_config_id
-                        st.session_state.selected_model_config_selector_id = new_config_id
+                        update_session_model_config(database_url, current_session.id, new_config_id)
                         st.success("模型配置已创建。")
                         st.rerun()
                     except DuplicateModelConfigName as exc:
@@ -806,13 +847,8 @@ with st.sidebar:
 
     with col_new:
         if st.button("新建", use_container_width=True):
-            try:
-                new_session_id = create_session(database_url)
-                # 会话下拉框已经实例化后不能在同一轮直接改它的 key，这里先暂存目标会话，下一轮脚本再同步选中项。
-                st.session_state.pending_active_session_id = new_session_id
-                st.rerun()
-            except SessionStorageError as exc:
-                st.error(f"创建失败：{exc}")
+            st.session_state.create_session_confirming = True
+            st.rerun()
 
     with col_rename:
         if st.button("重命名", use_container_width=True):
@@ -850,11 +886,6 @@ with st.sidebar:
     )
 
     st.caption(f"当前共有 {len(sessions)} 个会话。")
-
-
-# 设置弹窗中的组件会更新 session_state；后续渲染前重新读取，确保顶部状态和请求参数一致。
-selected_model_config = model_configs_by_id[st.session_state.selected_model_config_id]
-
 
 # ======== 当前会话消息 ========
 

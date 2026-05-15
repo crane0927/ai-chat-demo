@@ -25,6 +25,7 @@ class ChatSession:
     id: int
     title: str
     system_prompt: str
+    model_config_id: Optional[int]
     created_at: datetime
     updated_at: datetime
     message_count: int
@@ -65,9 +66,16 @@ def init_session_db(database_url: str) -> None:
                     id BIGSERIAL PRIMARY KEY,
                     title TEXT NOT NULL,
                     system_prompt TEXT NOT NULL DEFAULT '',
+                    model_config_id BIGINT REFERENCES model_configs(id) ON DELETE SET NULL,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
+                """
+            )
+            cursor.execute(
+                """
+                ALTER TABLE chat_sessions
+                ADD COLUMN IF NOT EXISTS model_config_id BIGINT REFERENCES model_configs(id) ON DELETE SET NULL
                 """
             )
             cursor.execute(
@@ -102,6 +110,7 @@ def _row_to_chat_session(row: Dict[str, Any]) -> ChatSession:
         id=row["id"],
         title=row["title"],
         system_prompt=row["system_prompt"],
+        model_config_id=row.get("model_config_id"),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         message_count=row["message_count"],
@@ -128,7 +137,7 @@ def _build_default_session_title(existing_titles: List[str]) -> str:
     return f"会话 {index}"
 
 
-def ensure_default_session(database_url: str) -> None:
+def ensure_default_session(database_url: str, model_config_id: Optional[int]) -> None:
     with _connect(database_url) as connection:
         with connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS total FROM chat_sessions")
@@ -139,10 +148,10 @@ def ensure_default_session(database_url: str) -> None:
             # 首次启动至少准备一个会话，避免页面出现“无可选会话”的空洞状态。
             cursor.execute(
                 """
-                INSERT INTO chat_sessions (title, system_prompt)
-                VALUES (%s, %s)
+                INSERT INTO chat_sessions (title, system_prompt, model_config_id)
+                VALUES (%s, %s, %s)
                 """,
-                ("会话 1", DEFAULT_SYSTEM_PROMPT),
+                ("会话 1", DEFAULT_SYSTEM_PROMPT, model_config_id),
             )
 
 
@@ -155,6 +164,7 @@ def list_sessions(database_url: str) -> List[ChatSession]:
                     s.id,
                     s.title,
                     s.system_prompt,
+                    s.model_config_id,
                     s.created_at,
                     s.updated_at,
                     COUNT(m.id)::INTEGER AS message_count
@@ -178,6 +188,7 @@ def get_session(database_url: str, session_id: int) -> Optional[ChatSession]:
                     s.id,
                     s.title,
                     s.system_prompt,
+                    s.model_config_id,
                     s.created_at,
                     s.updated_at,
                     COUNT(m.id)::INTEGER AS message_count
@@ -197,6 +208,7 @@ def create_session(
     database_url: str,
     title: Optional[str] = None,
     system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+    model_config_id: Optional[int] = None,
 ) -> int:
     try:
         with _connect(database_url) as connection:
@@ -209,11 +221,15 @@ def create_session(
 
                 cursor.execute(
                     """
-                    INSERT INTO chat_sessions (title, system_prompt)
-                    VALUES (%s, %s)
+                    INSERT INTO chat_sessions (title, system_prompt, model_config_id)
+                    VALUES (%s, %s, %s)
                     RETURNING id
                     """,
-                    (resolved_title, system_prompt.strip() or DEFAULT_SYSTEM_PROMPT),
+                    (
+                        resolved_title,
+                        system_prompt.strip() or DEFAULT_SYSTEM_PROMPT,
+                        model_config_id,
+                    ),
                 )
                 return cursor.fetchone()["id"]
     except SessionStorageError:
@@ -260,6 +276,47 @@ def update_session_system_prompt(
         raise
     except Exception as exc:
         raise SessionStorageError("保存系统提示词失败。") from exc
+
+
+def update_session_model_config(
+    database_url: str,
+    session_id: int,
+    model_config_id: Optional[int],
+) -> None:
+    try:
+        with _connect(database_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE chat_sessions
+                    SET model_config_id = %s, updated_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (model_config_id, session_id),
+                )
+    except SessionStorageError:
+        raise
+    except Exception as exc:
+        raise SessionStorageError("保存会话模型失败。") from exc
+
+
+def ensure_session_model_config(database_url: str, fallback_model_config_id: int) -> None:
+    try:
+        with _connect(database_url) as connection:
+            with connection.cursor() as cursor:
+                # 历史会话升级到按会话选模型后，缺省值统一回填到当前默认模型，避免出现“无模型可用”的空状态。
+                cursor.execute(
+                    """
+                    UPDATE chat_sessions
+                    SET model_config_id = %s
+                    WHERE model_config_id IS NULL
+                    """,
+                    (fallback_model_config_id,),
+                )
+    except SessionStorageError:
+        raise
+    except Exception as exc:
+        raise SessionStorageError("初始化会话模型失败。") from exc
 
 
 def delete_session(database_url: str, session_id: int) -> None:
