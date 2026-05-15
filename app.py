@@ -42,9 +42,8 @@ from ui.components import answer_source_html, render_app_header, render_assistan
 
 
 def model_config_label(config: ModelConfig) -> str:
-    disabled_label = " · 已停用" if not config.enabled else ""
-    provider_label = f"{config.provider} · " if config.provider else ""
-    return f"{config.name} · {provider_label}{config.model_name}{disabled_label}"
+    disabled_label = "（已停用）" if not config.enabled else ""
+    return f"{config.name}{disabled_label}"
 
 
 def build_model_config_input(
@@ -337,16 +336,247 @@ if (
     # 当前选择可能来自上一轮页面状态；配置被删除后需要回退到第一条可用配置。
     st.session_state.selected_model_config_id = model_configs[0].id if model_configs else None
 
+pending_model_config_id = st.session_state.pop("pending_selected_model_config_id", None)
+if pending_model_config_id in model_configs_by_id:
+    # 表单提交后不能在同一轮修改已实例化的小组件 key，因此把切换动作延迟到下一轮脚本执行。
+    st.session_state.selected_model_config_id = pending_model_config_id
+
+selected_model_config = model_configs_by_id[st.session_state.selected_model_config_id]
+
+
+@st.dialog("设置", width="large")
+def render_settings_dialog() -> None:
+    prompt_tab, model_tab = st.tabs(["提示词", "模型"])
+
+    with prompt_tab:
+        st.subheader("提示词")
+
+        # 设置页同时承载预览和编辑，避免会话侧边栏混入模型行为配置。
+        preview_prompt = st.toggle(
+            "预览 Markdown",
+            value=st.session_state.get("preview_prompt", True),
+            key="preview_prompt",
+        )
+        st.caption("系统提示词支持 Markdown，可编写角色、规则、列表和示例。")
+
+        if not preview_prompt:
+            st.text_area(
+                "系统提示词",
+                height=180,
+                key="system_prompt_input",
+            )
+        elif st.session_state.system_prompt_input.strip():
+            st.markdown(st.session_state.system_prompt_input)
+        else:
+            st.caption("暂无内容")
+
+    with model_tab:
+        st.subheader("模型")
+
+        selected_model_config_id = st.selectbox(
+            "当前模型配置",
+            list(model_configs_by_id.keys()),
+            key="selected_model_config_id",
+            format_func=lambda config_id: model_config_label(model_configs_by_id[config_id]),
+            help="切换后，下一次提问会使用所选模型配置。",
+        )
+        current_config = model_configs_by_id[selected_model_config_id]
+        st.caption(
+            f"服务商：{current_config.provider or '未设置'} · "
+            f"Base URL：{current_config.base_url or '默认 OpenAI 地址'}"
+        )
+
+        edit_tab, new_tab = st.tabs(["编辑当前配置", "新增模型配置"])
+
+        with edit_tab:
+            with st.form("edit_model_config_form"):
+                edit_name = st.text_input("配置名称", value=current_config.name)
+                edit_provider = st.text_input("服务商", value=current_config.provider)
+                edit_api_key = st.text_input(
+                    "API Key",
+                    type="password",
+                    value=current_config.api_key,
+                    help="当前版本会保存到 PostgreSQL；正式部署建议改为加密存储。",
+                )
+                edit_base_url = st.text_input(
+                    "Base URL",
+                    value=current_config.base_url,
+                    placeholder="https://api.deepseek.com",
+                )
+                edit_model_name = st.text_input("模型", value=current_config.model_name)
+                edit_enabled = st.checkbox("启用此配置", value=current_config.enabled)
+                edit_temperature = st.slider(
+                    "温度",
+                    0.0,
+                    1.0,
+                    current_config.temperature,
+                    0.1,
+                    help="控制模型回复的随机性，数值越高越发散。",
+                )
+                edit_max_tokens = st.number_input(
+                    "最大输出 Token",
+                    min_value=1,
+                    max_value=32000,
+                    value=current_config.max_tokens,
+                    step=256,
+                )
+                edit_context_message_limit = st.number_input(
+                    "上下文消息数",
+                    min_value=1,
+                    max_value=200,
+                    value=current_config.context_message_limit,
+                    step=2,
+                )
+                edit_timeout_seconds = st.number_input(
+                    "请求超时（秒）",
+                    min_value=1.0,
+                    max_value=300.0,
+                    value=current_config.timeout_seconds,
+                    step=5.0,
+                )
+                edit_max_retries = st.number_input(
+                    "自动重试次数",
+                    min_value=0,
+                    max_value=10,
+                    value=current_config.max_retries,
+                    step=1,
+                )
+                edit_submitted = st.form_submit_button("保存当前配置", use_container_width=True)
+
+            if edit_submitted:
+                if not edit_name.strip() or not edit_model_name.strip():
+                    st.error("配置名称和模型不能为空。")
+                else:
+                    try:
+                        update_model_config(
+                            database_url,
+                            current_config.id,
+                            build_model_config_input(
+                                edit_name,
+                                edit_provider,
+                                edit_api_key,
+                                edit_base_url,
+                                edit_model_name,
+                                edit_temperature,
+                                edit_max_tokens,
+                                edit_context_message_limit,
+                                edit_timeout_seconds,
+                                edit_max_retries,
+                                edit_enabled,
+                            ),
+                        )
+                        st.success("模型配置已保存。")
+                        st.rerun()
+                    except DuplicateModelConfigName as exc:
+                        st.error(str(exc))
+                    except ModelConfigStorageError as exc:
+                        st.error(f"保存失败：{exc}")
+
+            confirm_delete = st.checkbox("确认删除当前配置")
+            if st.button(
+                "删除当前配置",
+                disabled=len(model_configs) <= 1 or not confirm_delete,
+                use_container_width=True,
+            ):
+                try:
+                    delete_model_config(database_url, current_config.id)
+                    st.rerun()
+                except ModelConfigStorageError as exc:
+                    st.error(f"删除失败：{exc}")
+
+        with new_tab:
+            with st.form("new_model_config_form"):
+                new_name = st.text_input("配置名称", placeholder="OpenAI GPT-4.1")
+                new_provider = st.text_input("服务商", placeholder="OpenAI")
+                new_api_key = st.text_input(
+                    "API Key",
+                    type="password",
+                    placeholder="sk-xxxxxx",
+                    help="当前版本会保存到 PostgreSQL；正式部署建议改为加密存储。",
+                )
+                new_base_url = st.text_input("Base URL", placeholder="https://api.openai.com/v1")
+                new_model_name = st.text_input("模型", placeholder="gpt-4.1")
+                new_temperature = st.slider(
+                    "温度",
+                    0.0,
+                    1.0,
+                    0.7,
+                    0.1,
+                    key="new_temperature",
+                )
+                new_max_tokens = st.number_input(
+                    "最大输出 Token",
+                    min_value=1,
+                    max_value=32000,
+                    value=2048,
+                    step=256,
+                    key="new_max_tokens",
+                )
+                new_context_message_limit = st.number_input(
+                    "上下文消息数",
+                    min_value=1,
+                    max_value=200,
+                    value=20,
+                    step=2,
+                    key="new_context_message_limit",
+                )
+                new_timeout_seconds = st.number_input(
+                    "请求超时（秒）",
+                    min_value=1.0,
+                    max_value=300.0,
+                    value=60.0,
+                    step=5.0,
+                    key="new_timeout_seconds",
+                )
+                new_max_retries = st.number_input(
+                    "自动重试次数",
+                    min_value=0,
+                    max_value=10,
+                    value=2,
+                    step=1,
+                    key="new_max_retries",
+                )
+                new_submitted = st.form_submit_button("创建模型配置", use_container_width=True)
+
+            if new_submitted:
+                if not new_name.strip() or not new_model_name.strip():
+                    st.error("配置名称和模型不能为空。")
+                else:
+                    try:
+                        new_config_id = create_model_config(
+                            database_url,
+                            build_model_config_input(
+                                new_name,
+                                new_provider,
+                                new_api_key,
+                                new_base_url,
+                                new_model_name,
+                                new_temperature,
+                                new_max_tokens,
+                                new_context_message_limit,
+                                new_timeout_seconds,
+                                new_max_retries,
+                                True,
+                            ),
+                        )
+                        st.session_state.pending_selected_model_config_id = new_config_id
+                        st.success("模型配置已创建。")
+                        st.rerun()
+                    except DuplicateModelConfigName as exc:
+                        st.error(str(exc))
+                    except ModelConfigStorageError as exc:
+                        st.error(f"创建失败：{exc}")
+
+        st.caption("模型配置保存到 PostgreSQL。配置停用或未填写 API Key 时，本轮对话会使用本地回显。")
+
 
 # ======== 侧边栏设置区域 ========
 
 with st.sidebar:
     # with st.sidebar 表示：下面缩进的内容都显示在侧边栏
 
-    st.title("控制台")
-    st.caption("管理会话、提示词和模型连接。")
-
-    st.subheader("会话")
+    st.title("会话")
+    st.caption("选择、创建或删除对话。")
 
     session_names = list(st.session_state.sessions.keys())
     previous_session = st.session_state.active_session
@@ -381,229 +611,9 @@ with st.sidebar:
 
     st.caption(f"当前共有 {len(st.session_state.sessions)} 个会话。")
 
-    st.divider()
-    st.subheader("提示词")
 
-    # 预览和编辑共用同一块区域，避免侧边栏同时出现两个提示词面板。
-    preview_prompt = st.toggle(
-        "预览 Markdown",
-        value=True,
-    )
-    st.caption("系统提示词支持 Markdown，可编写角色、规则、列表和示例。")
-
-    if not preview_prompt:
-        # 系统提示词输入框（多行文本）
-        system_prompt = st.text_area(
-            "系统提示词",
-            height=150,
-            key="system_prompt_input"
-        )
-    else:
-        system_prompt = st.session_state.system_prompt_input
-        if system_prompt.strip():
-            st.markdown(system_prompt)
-        else:
-            st.caption("暂无内容")
-
-    st.divider()
-    st.subheader("模型")
-
-    with st.expander("普通参数", expanded=True):
-        selected_model_config_id = st.selectbox(
-            "当前模型配置",
-            list(model_configs_by_id.keys()),
-            key="selected_model_config_id",
-            format_func=lambda config_id: model_config_label(model_configs_by_id[config_id]),
-            help="切换后，下一次提问会使用所选模型配置。",
-        )
-
-        selected_model_config = model_configs_by_id[selected_model_config_id]
-        st.caption(
-            f"服务商：{selected_model_config.provider or '未设置'} · "
-            f"Base URL：{selected_model_config.base_url or '默认 OpenAI 地址'}"
-        )
-
-    with st.expander("编辑当前配置"):
-        with st.form("edit_model_config_form"):
-            edit_name = st.text_input("配置名称", value=selected_model_config.name)
-            edit_provider = st.text_input("服务商", value=selected_model_config.provider)
-            edit_api_key = st.text_input(
-                "API Key",
-                type="password",
-                value=selected_model_config.api_key,
-                help="当前版本会保存到 PostgreSQL；正式部署建议改为加密存储。",
-            )
-            edit_base_url = st.text_input(
-                "Base URL",
-                value=selected_model_config.base_url,
-                placeholder="https://api.deepseek.com",
-            )
-            edit_model_name = st.text_input("模型", value=selected_model_config.model_name)
-            edit_enabled = st.checkbox("启用此配置", value=selected_model_config.enabled)
-            edit_temperature = st.slider(
-                "温度",
-                0.0,
-                1.0,
-                selected_model_config.temperature,
-                0.1,
-                help="控制模型回复的随机性，数值越高越发散。",
-            )
-            edit_max_tokens = st.number_input(
-                "最大输出 Token",
-                min_value=1,
-                max_value=32000,
-                value=selected_model_config.max_tokens,
-                step=256,
-            )
-            edit_context_message_limit = st.number_input(
-                "上下文消息数",
-                min_value=1,
-                max_value=200,
-                value=selected_model_config.context_message_limit,
-                step=2,
-            )
-            edit_timeout_seconds = st.number_input(
-                "请求超时（秒）",
-                min_value=1.0,
-                max_value=300.0,
-                value=selected_model_config.timeout_seconds,
-                step=5.0,
-            )
-            edit_max_retries = st.number_input(
-                "自动重试次数",
-                min_value=0,
-                max_value=10,
-                value=selected_model_config.max_retries,
-                step=1,
-            )
-            edit_submitted = st.form_submit_button("保存当前配置", use_container_width=True)
-
-        if edit_submitted:
-            if not edit_name.strip() or not edit_model_name.strip():
-                st.error("配置名称和模型不能为空。")
-            else:
-                try:
-                    update_model_config(
-                        database_url,
-                        selected_model_config.id,
-                        build_model_config_input(
-                            edit_name,
-                            edit_provider,
-                            edit_api_key,
-                            edit_base_url,
-                            edit_model_name,
-                            edit_temperature,
-                            edit_max_tokens,
-                            edit_context_message_limit,
-                            edit_timeout_seconds,
-                            edit_max_retries,
-                            edit_enabled,
-                        ),
-                    )
-                    st.success("模型配置已保存。")
-                    st.rerun()
-                except DuplicateModelConfigName as exc:
-                    st.error(str(exc))
-                except ModelConfigStorageError as exc:
-                    st.error(f"保存失败：{exc}")
-
-        confirm_delete = st.checkbox("确认删除当前配置")
-        if st.button(
-            "删除当前配置",
-            disabled=len(model_configs) <= 1 or not confirm_delete,
-            use_container_width=True,
-        ):
-            try:
-                delete_model_config(database_url, selected_model_config.id)
-                st.session_state.selected_model_config_id = None
-                st.rerun()
-            except ModelConfigStorageError as exc:
-                st.error(f"删除失败：{exc}")
-
-    with st.expander("新增模型配置"):
-        with st.form("new_model_config_form"):
-            new_name = st.text_input("配置名称", placeholder="OpenAI GPT-4.1")
-            new_provider = st.text_input("服务商", placeholder="OpenAI")
-            new_api_key = st.text_input(
-                "API Key",
-                type="password",
-                placeholder="sk-xxxxxx",
-                help="当前版本会保存到 PostgreSQL；正式部署建议改为加密存储。",
-            )
-            new_base_url = st.text_input("Base URL", placeholder="https://api.openai.com/v1")
-            new_model_name = st.text_input("模型", placeholder="gpt-4.1")
-            new_temperature = st.slider("温度", 0.0, 1.0, 0.7, 0.1, key="new_temperature")
-            new_max_tokens = st.number_input(
-                "最大输出 Token",
-                min_value=1,
-                max_value=32000,
-                value=2048,
-                step=256,
-                key="new_max_tokens",
-            )
-            new_context_message_limit = st.number_input(
-                "上下文消息数",
-                min_value=1,
-                max_value=200,
-                value=20,
-                step=2,
-                key="new_context_message_limit",
-            )
-            new_timeout_seconds = st.number_input(
-                "请求超时（秒）",
-                min_value=1.0,
-                max_value=300.0,
-                value=60.0,
-                step=5.0,
-                key="new_timeout_seconds",
-            )
-            new_max_retries = st.number_input(
-                "自动重试次数",
-                min_value=0,
-                max_value=10,
-                value=2,
-                step=1,
-                key="new_max_retries",
-            )
-            new_submitted = st.form_submit_button("创建模型配置", use_container_width=True)
-
-        if new_submitted:
-            if not new_name.strip() or not new_model_name.strip():
-                st.error("配置名称和模型不能为空。")
-            else:
-                try:
-                    new_config_id = create_model_config(
-                        database_url,
-                        build_model_config_input(
-                            new_name,
-                            new_provider,
-                            new_api_key,
-                            new_base_url,
-                            new_model_name,
-                            new_temperature,
-                            new_max_tokens,
-                            new_context_message_limit,
-                            new_timeout_seconds,
-                            new_max_retries,
-                            True,
-                        ),
-                    )
-                    st.session_state.selected_model_config_id = new_config_id
-                    st.success("模型配置已创建。")
-                    st.rerun()
-                except DuplicateModelConfigName as exc:
-                    st.error(str(exc))
-                except ModelConfigStorageError as exc:
-                    st.error(f"创建失败：{exc}")
-
-    st.markdown(
-        """
-        <div class="sidebar-note">
-            模型配置保存到 PostgreSQL。配置停用或未填写 API Key 时，本轮对话会使用本地回显。
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+# 设置弹窗中的组件会更新 session_state；后续渲染前重新读取，确保顶部状态和请求参数一致。
+selected_model_config = model_configs_by_id[st.session_state.selected_model_config_id]
 
 
 # ======== 当前会话消息 ========
@@ -613,6 +623,7 @@ messages = get_current_messages(st.session_state)
 
 # ======== 同步 system prompt（侧边栏修改后生效） ========
 
+system_prompt = st.session_state.system_prompt_input
 sync_system_prompt(messages, system_prompt)
 
 
@@ -621,6 +632,11 @@ sync_system_prompt(messages, system_prompt)
 visible_messages = get_visible_messages(messages)
 use_model_api = bool(selected_model_config.enabled and selected_model_config.api_key.strip())
 mode_label = "模型接口" if use_model_api else "本地回显"
+_, settings_col = st.columns([0.86, 0.14])
+with settings_col:
+    if st.button("设置", use_container_width=True):
+        render_settings_dialog()
+
 header_slot = st.empty()
 # 顶部状态需要在用户发送消息后即时重绘，所以先用占位容器承载。
 render_app_header(
@@ -642,7 +658,7 @@ if not visible_messages:
         """
         <div class="empty-state">
             <h2>开始新的对话</h2>
-            <p>输入一个问题，或者先在侧边栏调整提示词和模型配置。</p>
+            <p>输入一个问题，或者先在设置中调整提示词和模型配置。</p>
         </div>
         """,
         unsafe_allow_html=True
