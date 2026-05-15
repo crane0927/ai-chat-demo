@@ -38,6 +38,20 @@ from services.model_config import (
     list_model_configs,
     update_model_config,
 )
+from services.prompt_template import (
+    DuplicatePromptTemplateName,
+    PromptTemplate,
+    PromptTemplateInput,
+    PromptTemplateStorageError,
+    create_prompt_template,
+    delete_prompt_template,
+    ensure_default_prompt_templates,
+    extract_template_variables,
+    init_prompt_template_db,
+    list_prompt_templates,
+    render_prompt_template,
+    update_prompt_template,
+)
 from services.session import (
     ChatMessage,
     ChatSession,
@@ -152,6 +166,31 @@ def build_session_export_filename(session: ChatSession, suffix: str) -> str:
     safe_title = re.sub(r"[^\w\u4e00-\u9fff-]+", "-", session.title.strip(), flags=re.UNICODE)
     safe_title = safe_title.strip("-_") or f"session-{session.id}"
     return f"{safe_title}.{suffix}"
+
+
+def prompt_template_label(template: PromptTemplate) -> str:
+    builtin_label = "（内置）" if template.builtin else ""
+    return f"{template.name}{builtin_label}"
+
+
+def build_prompt_template_input(name: str, description: str, content: str) -> PromptTemplateInput:
+    return PromptTemplateInput(
+        name=name,
+        description=description,
+        content=content,
+        builtin=False,
+    )
+
+
+def build_template_copy_name(existing_templates: list[PromptTemplate], source_name: str) -> str:
+    existing_names = {template.name for template in existing_templates}
+    if f"{source_name} 副本" not in existing_names:
+        return f"{source_name} 副本"
+
+    index = 2
+    while f"{source_name} 副本 {index}" in existing_names:
+        index += 1
+    return f"{source_name} 副本 {index}"
 
 
 # ======== Streamlit 页面基础设置 ========
@@ -400,6 +439,10 @@ try:
     default_model_config = model_configs[0] if model_configs else None
     init_app_settings_db(database_url)
     global_system_prompt = get_global_system_prompt(database_url)
+    init_prompt_template_db(database_url)
+    ensure_default_prompt_templates(database_url)
+    prompt_templates = list_prompt_templates(database_url)
+    prompt_templates_by_id = {template.id: template for template in prompt_templates}
     init_session_db(database_url)
     ensure_default_session(
         database_url,
@@ -420,6 +463,10 @@ except AppSettingsStorageError as exc:
 except ModelConfigStorageError as exc:
     # 数据库不可用时停止渲染后续聊天逻辑，避免用户误以为模型配置已经保存。
     st.error(f"模型配置数据库不可用：{exc}")
+    st.info("请确认 PostgreSQL 已启动，并设置 APP_DATABASE_URL 或 DATABASE_URL。")
+    st.stop()
+except PromptTemplateStorageError as exc:
+    st.error(f"提示词模板数据库不可用：{exc}")
     st.info("请确认 PostgreSQL 已启动，并设置 APP_DATABASE_URL 或 DATABASE_URL。")
     st.stop()
 
@@ -453,9 +500,16 @@ elif st.session_state.active_session_selector_id != st.session_state.active_sess
 if "delete_model_config_confirming_id" not in st.session_state:
     st.session_state.delete_model_config_confirming_id = None
 
+if prompt_templates and "selected_prompt_template_id" not in st.session_state:
+    st.session_state.selected_prompt_template_id = prompt_templates[0].id
+
 current_session = sessions_by_id.get(st.session_state.active_session_id)
 current_preview_prompt = st.session_state.get("preview_prompt", True)
 previous_preview_prompt = st.session_state.get("previous_preview_prompt", current_preview_prompt)
+
+if prompt_templates:
+    if st.session_state.selected_prompt_template_id not in prompt_templates_by_id:
+        st.session_state.selected_prompt_template_id = prompt_templates[0].id
 
 if "create_session_confirming" not in st.session_state:
     st.session_state.create_session_confirming = False
@@ -616,7 +670,9 @@ def render_settings_dialog() -> None:
 
     with prompt_tab:
         st.subheader("提示词")
-        current_prompt_tab, global_prompt_tab = st.tabs(["当前会话", "全局默认"])
+        current_prompt_tab, global_prompt_tab, template_library_tab = st.tabs(
+            ["当前会话", "全局默认", "模板库"]
+        )
 
         with current_prompt_tab:
             # 设置页同时承载预览和编辑，避免会话侧边栏混入模型行为配置。
@@ -663,6 +719,214 @@ def render_settings_dialog() -> None:
                     st.rerun()
                 except AppSettingsStorageError as exc:
                     st.error(f"保存失败：{exc}")
+
+        with template_library_tab:
+            st.caption("支持保存、编辑、复制和应用模板；占位符使用 `{{变量名}}` 格式。")
+
+            template_use_tab, template_new_tab = st.tabs(["使用模板", "新增模板"])
+
+            with template_use_tab:
+                if not prompt_templates:
+                    st.info("当前还没有可用模板，请先新增模板。")
+                else:
+                    selected_template_id = st.selectbox(
+                        "选择模板",
+                        list(prompt_templates_by_id.keys()),
+                        key="selected_prompt_template_id",
+                        format_func=lambda template_id: prompt_template_label(
+                            prompt_templates_by_id[template_id]
+                        ),
+                    )
+                    selected_template = prompt_templates_by_id[selected_template_id]
+                    template_variables = extract_template_variables(selected_template.content)
+
+                    if selected_template.description.strip():
+                        st.caption(selected_template.description)
+
+                    variable_values = {}
+                    if template_variables:
+                        st.markdown("**变量填写**")
+                        # 变量输入框按模板 ID 隔离，避免切换模板时把不同含义的值串在一起。
+                        for variable_name in template_variables:
+                            variable_values[variable_name] = st.text_input(
+                                variable_name,
+                                key=f"prompt_template_var_{selected_template.id}_{variable_name}",
+                            )
+                    else:
+                        st.caption("该模板没有变量占位符，可直接应用。")
+
+                    rendered_template_content = render_prompt_template(
+                        selected_template.content,
+                        variable_values,
+                    )
+                    missing_variables = [
+                        variable_name
+                        for variable_name in template_variables
+                        if not variable_values.get(variable_name, "").strip()
+                    ]
+
+                    st.text_area(
+                        "渲染预览",
+                        value=rendered_template_content,
+                        height=220,
+                        disabled=True,
+                    )
+                    if missing_variables:
+                        st.caption(
+                            "以下变量尚未填写，预览中会保留原占位符："
+                            + "、".join(missing_variables)
+                        )
+
+                    apply_current_col, apply_global_col, duplicate_col = st.columns(3)
+
+                    with apply_current_col:
+                        if st.button(
+                            "应用到当前会话",
+                            use_container_width=True,
+                            key=f"apply_template_current_{selected_template.id}",
+                        ):
+                            try:
+                                # 应用模板时同时更新数据库和编辑草稿，保证页面状态与持久化一致。
+                                update_session_system_prompt(
+                                    database_url,
+                                    current_session.id,
+                                    rendered_template_content,
+                                )
+                                st.session_state.system_prompt_draft = rendered_template_content
+                                st.session_state.preview_prompt = False
+                                st.success("已应用到当前会话。")
+                                st.rerun()
+                            except SessionStorageError as exc:
+                                st.error(f"应用失败：{exc}")
+
+                    with apply_global_col:
+                        if st.button(
+                            "设为全局默认",
+                            use_container_width=True,
+                            key=f"apply_template_global_{selected_template.id}",
+                        ):
+                            try:
+                                update_global_system_prompt(database_url, rendered_template_content)
+                                st.session_state.global_system_prompt_draft = rendered_template_content
+                                st.success("已更新全局默认提示词。")
+                                st.rerun()
+                            except AppSettingsStorageError as exc:
+                                st.error(f"应用失败：{exc}")
+
+                    with duplicate_col:
+                        if st.button(
+                            "复制为新模板",
+                            use_container_width=True,
+                            key=f"duplicate_template_{selected_template.id}",
+                        ):
+                            try:
+                                create_prompt_template(
+                                    database_url,
+                                    PromptTemplateInput(
+                                        name=build_template_copy_name(prompt_templates, selected_template.name),
+                                        description=selected_template.description,
+                                        content=selected_template.content,
+                                        builtin=False,
+                                    ),
+                                )
+                                st.success("模板已复制。")
+                                st.rerun()
+                            except DuplicatePromptTemplateName as exc:
+                                st.error(str(exc))
+                            except PromptTemplateStorageError as exc:
+                                st.error(f"复制失败：{exc}")
+
+                    st.divider()
+                    st.markdown("**编辑当前模板**")
+                    with st.form(f"edit_prompt_template_form_{selected_template.id}"):
+                        edit_template_name = st.text_input("模板名称", value=selected_template.name)
+                        edit_template_description = st.text_input(
+                            "模板说明",
+                            value=selected_template.description,
+                        )
+                        edit_template_content = st.text_area(
+                            "模板内容",
+                            value=selected_template.content,
+                            height=220,
+                        )
+                        edit_template_submitted = st.form_submit_button(
+                            "保存模板",
+                            use_container_width=True,
+                        )
+
+                    if edit_template_submitted:
+                        if not edit_template_name.strip() or not edit_template_content.strip():
+                            st.error("模板名称和模板内容不能为空。")
+                        else:
+                            try:
+                                update_prompt_template(
+                                    database_url,
+                                    selected_template.id,
+                                    PromptTemplateInput(
+                                        name=edit_template_name,
+                                        description=edit_template_description,
+                                        content=edit_template_content,
+                                        builtin=selected_template.builtin,
+                                    ),
+                                )
+                                st.success("模板已保存。")
+                                st.rerun()
+                            except DuplicatePromptTemplateName as exc:
+                                st.error(str(exc))
+                            except PromptTemplateStorageError as exc:
+                                st.error(f"保存失败：{exc}")
+
+                    if st.button(
+                        "删除当前模板",
+                        use_container_width=True,
+                        key=f"delete_prompt_template_{selected_template.id}",
+                    ):
+                        try:
+                            delete_prompt_template(database_url, selected_template.id)
+                            st.success("模板已删除。")
+                            st.rerun()
+                        except PromptTemplateStorageError as exc:
+                            st.error(f"删除失败：{exc}")
+
+            with template_new_tab:
+                with st.form("new_prompt_template_form"):
+                    new_template_name = st.text_input("模板名称", placeholder="例如：产品需求分析")
+                    new_template_description = st.text_input(
+                        "模板说明",
+                        placeholder="描述适用场景，便于后续选择。",
+                    )
+                    new_template_content = st.text_area(
+                        "模板内容",
+                        height=220,
+                        placeholder=(
+                            "你是一名产品分析助手。\n"
+                            "请围绕“{{产品名称}}”分析目标用户、核心痛点和改进建议。"
+                        ),
+                    )
+                    new_template_submitted = st.form_submit_button(
+                        "创建模板",
+                        use_container_width=True,
+                    )
+
+                if new_template_submitted:
+                    if not new_template_name.strip() or not new_template_content.strip():
+                        st.error("模板名称和模板内容不能为空。")
+                    else:
+                        try:
+                            create_prompt_template(
+                                database_url,
+                                build_prompt_template_input(
+                                    new_template_name,
+                                    new_template_description,
+                                    new_template_content,
+                                ),
+                            )
+                            st.success("模板已创建。")
+                            st.rerun()
+                        except DuplicatePromptTemplateName as exc:
+                            st.error(str(exc))
+                        except PromptTemplateStorageError as exc:
+                            st.error(f"创建失败：{exc}")
 
     with model_tab:
         st.subheader("模型")
