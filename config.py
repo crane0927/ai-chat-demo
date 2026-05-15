@@ -3,6 +3,7 @@ import os
 
 APP_TITLE = "AI 助理"
 DEFAULT_SYSTEM_PROMPT = "你叫困困，是一个 AI 助理，请使用可爱活泼的语气回复用户的问题。"
+DEFAULT_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/ai_chat_demo"
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_CHAT_MODEL = "deepseek-chat"
 DEFAULT_MAX_TOKENS = 2048
@@ -13,6 +14,10 @@ DEFAULT_MAX_RETRIES = 2
 
 def get_env_api_key() -> str:
     return os.getenv("OPENAI_API_KEY", "")
+
+
+def get_database_url() -> str:
+    return os.getenv("APP_DATABASE_URL") or os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
 
 
 def get_env_base_url() -> str:

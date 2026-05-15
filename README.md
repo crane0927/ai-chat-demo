@@ -7,8 +7,8 @@
 - 基于 Streamlit 的简洁聊天界面
 - 支持多会话创建、切换和删除
 - 支持自定义系统提示词
-- 支持调整 temperature 参数
-- 支持最大输出 Token、上下文消息数、请求超时和自动重试配置
+- 支持保存多个模型配置，并在页面中自由切换当前提问使用的模型
+- 支持按模型配置保存 API Key、Base URL、模型名、temperature、最大输出 Token、上下文消息数、请求超时和自动重试
 - 支持 OpenAI SDK 流式输出
 - 支持 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_CHAT_MODEL` 等环境变量
 - 未启用接口或未安装依赖时，可使用本地回显模式
@@ -21,6 +21,7 @@
 ├── config.py           # 默认配置和环境变量读取
 ├── services/
 │   ├── llm.py          # 模型调用、本地回显和消息清洗
+│   ├── model_config.py # 模型配置数据库读写
 │   └── session.py      # 会话状态管理
 ├── ui/
 │   └── components.py   # 页面组件渲染函数
@@ -34,6 +35,7 @@
 
 - Python 3.9 或更高版本
 - pip
+- PostgreSQL
 
 ## 安装依赖
 
@@ -52,6 +54,13 @@ pip install -r requirements.txt
 
 ## 运行项目
 
+先确认 PostgreSQL 数据库已创建，例如：
+
+```bash
+createdb ai_chat_demo
+export APP_DATABASE_URL="postgresql://你的用户:你的密码@localhost:5432/ai_chat_demo"
+```
+
 ```bash
 streamlit run app.py
 ```
@@ -64,11 +73,31 @@ http://localhost:8501
 
 ## 使用本地回显模式
 
-默认情况下，侧边栏中的“使用 OpenAI 接口（需要 OPENAI_API_KEY）”未勾选。此时应用不会请求外部模型接口，而是返回本地回显内容，适合快速验证页面是否正常运行。
+当当前模型配置被停用，或未填写 API Key 时，应用不会请求外部模型接口，而是返回本地回显内容，适合快速验证页面是否正常运行。
 
 ## 使用模型接口
 
-如需调用 OpenAI 或 OpenAI 兼容接口，请先配置 API Key。
+如需调用 OpenAI 或 OpenAI 兼容接口，请先在侧边栏的“模型”区域创建或编辑模型配置。当前应用支持保存多个模型配置，并通过“当前模型配置”下拉框切换下一次提问使用的模型。
+
+模型配置会保存到 PostgreSQL。请先准备数据库，并配置连接串：
+
+```bash
+export APP_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/ai_chat_demo"
+```
+
+也可以使用常见的 `DATABASE_URL`：
+
+```bash
+export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/ai_chat_demo"
+```
+
+如果两个变量都未设置，应用会默认尝试连接：
+
+```text
+postgresql://postgres:postgres@localhost:5432/ai_chat_demo
+```
+
+首次启动时，应用会使用现有环境变量创建一条默认模型配置。
 
 方式一：通过环境变量配置：
 
@@ -83,14 +112,19 @@ export OPENAI_MAX_RETRIES="2"
 streamlit run app.py
 ```
 
-方式二：在页面侧边栏中填写：
+方式二：在页面侧边栏中维护模型配置：
 
-- `OpenAI API Key`
+- `配置名称`
+- `服务商`
+- `API Key`
 - `Base URL`
 - `模型`
-- 高级参数：最大输出 Token、上下文消息数、请求超时、自动重试次数
+- `temperature`
+- 最大输出 Token、上下文消息数、请求超时、自动重试次数
 
-然后勾选“使用 OpenAI 接口（需要 OPENAI_API_KEY）”。
+配置停用或未填写 API Key 时，应用会自动使用本地回显模式。
+
+> 注意：当前版本面向本地 Demo，API Key 会明文保存在 PostgreSQL 中。正式部署时建议改为加密存储、环境变量注入或服务端密钥管理。
 
 ## 常用配置
 
@@ -103,6 +137,8 @@ streamlit run app.py
 | `OPENAI_CONTEXT_MESSAGES` | 发送给模型的最近上下文消息数，不含系统提示词 | `20` |
 | `OPENAI_TIMEOUT_SECONDS` | 模型请求超时时间，单位秒 | `60` |
 | `OPENAI_MAX_RETRIES` | SDK 自动重试次数 | `2` |
+| `APP_DATABASE_URL` | PostgreSQL 连接串 | `postgresql://postgres:postgres@localhost:5432/ai_chat_demo` |
+| `DATABASE_URL` | PostgreSQL 连接串，未设置 `APP_DATABASE_URL` 时使用 | 同上 |
 
 ## 常见问题
 

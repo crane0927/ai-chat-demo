@@ -5,3 +5,6 @@ __pycache__/
 .env.*
 !.env.example
 .streamlit/secrets.toml
+data/*.db
+data/*.sqlite
+data/*.sqlite3
