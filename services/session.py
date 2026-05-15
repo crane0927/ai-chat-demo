@@ -137,7 +137,11 @@ def _build_default_session_title(existing_titles: List[str]) -> str:
     return f"会话 {index}"
 
 
-def ensure_default_session(database_url: str, model_config_id: Optional[int]) -> None:
+def ensure_default_session(
+    database_url: str,
+    model_config_id: Optional[int],
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+) -> None:
     with _connect(database_url) as connection:
         with connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS total FROM chat_sessions")
@@ -151,7 +155,7 @@ def ensure_default_session(database_url: str, model_config_id: Optional[int]) ->
                 INSERT INTO chat_sessions (title, system_prompt, model_config_id)
                 VALUES (%s, %s, %s)
                 """,
-                ("会话 1", DEFAULT_SYSTEM_PROMPT, model_config_id),
+                ("会话 1", system_prompt.strip() or DEFAULT_SYSTEM_PROMPT, model_config_id),
             )
 
 

@@ -14,6 +14,12 @@ from config import (
     get_database_url,
     get_env_api_key,
 )
+from services.app_settings import (
+    AppSettingsStorageError,
+    get_global_system_prompt,
+    init_app_settings_db,
+    update_global_system_prompt,
+)
 from services.llm import (
     ModelRequestOptions,
     get_answer_source,
@@ -392,13 +398,23 @@ try:
     model_configs = list_model_configs(database_url)
     model_configs_by_id = {config.id: config for config in model_configs}
     default_model_config = model_configs[0] if model_configs else None
+    init_app_settings_db(database_url)
+    global_system_prompt = get_global_system_prompt(database_url)
     init_session_db(database_url)
-    ensure_default_session(database_url, default_model_config.id if default_model_config else None)
+    ensure_default_session(
+        database_url,
+        default_model_config.id if default_model_config else None,
+        global_system_prompt,
+    )
     if default_model_config is not None:
         ensure_session_model_config(database_url, default_model_config.id)
     sessions = list_sessions(database_url)
 except SessionStorageError as exc:
     st.error(f"聊天记录数据库不可用：{exc}")
+    st.info("请确认 PostgreSQL 已启动，并设置 APP_DATABASE_URL 或 DATABASE_URL。")
+    st.stop()
+except AppSettingsStorageError as exc:
+    st.error(f"全局设置数据库不可用：{exc}")
     st.info("请确认 PostgreSQL 已启动，并设置 APP_DATABASE_URL 或 DATABASE_URL。")
     st.stop()
 except ModelConfigStorageError as exc:
@@ -443,6 +459,9 @@ previous_preview_prompt = st.session_state.get("previous_preview_prompt", curren
 
 if "create_session_confirming" not in st.session_state:
     st.session_state.create_session_confirming = False
+
+if "global_system_prompt_draft" not in st.session_state:
+    st.session_state.global_system_prompt_draft = global_system_prompt
 
 if current_session is None:
     st.error("未找到当前会话，请刷新页面重试。")
@@ -565,6 +584,7 @@ def render_create_session_dialog() -> None:
             list(model_configs_by_id.keys()),
             format_func=lambda config_id: model_config_label(model_configs_by_id[config_id]),
         )
+        st.caption("新会话会默认使用全局默认提示词，创建后仍可按会话单独修改。")
         submitted = st.form_submit_button("创建会话", use_container_width=True)
 
     if submitted:
@@ -572,6 +592,7 @@ def render_create_session_dialog() -> None:
             new_session_id = create_session(
                 database_url,
                 title=new_session_title,
+                system_prompt=st.session_state.global_system_prompt_draft,
                 model_config_id=new_session_model_config_id,
             )
             st.session_state.pending_active_session_id = new_session_id
@@ -595,32 +616,53 @@ def render_settings_dialog() -> None:
 
     with prompt_tab:
         st.subheader("提示词")
+        current_prompt_tab, global_prompt_tab = st.tabs(["当前会话", "全局默认"])
 
-        # 设置页同时承载预览和编辑，避免会话侧边栏混入模型行为配置。
-        preview_prompt = st.toggle(
-            "预览 Markdown",
-            value=st.session_state.get("preview_prompt", True),
-            key="preview_prompt",
-        )
-        st.caption("系统提示词支持 Markdown，可编写角色、规则、列表和示例。")
+        with current_prompt_tab:
+            # 设置页同时承载预览和编辑，避免会话侧边栏混入模型行为配置。
+            preview_prompt = st.toggle(
+                "预览 Markdown",
+                value=st.session_state.get("preview_prompt", True),
+                key="preview_prompt",
+            )
+            st.caption("当前会话的系统提示词可单独修改，不影响其他会话。")
 
-        if not preview_prompt:
-            editor_key = (
-                f"system_prompt_editor_{current_session.id}_"
-                f"{st.session_state.get('system_prompt_editor_nonce', 0)}"
-            )
-            editor_value = st.text_area(
-                "系统提示词",
-                height=180,
-                value=st.session_state.system_prompt_draft,
-                key=editor_key,
-            )
-            st.session_state.system_prompt_editor_active_key = editor_key
-            st.session_state.system_prompt_draft = editor_value
-        elif st.session_state.system_prompt_draft.strip():
-            st.markdown(st.session_state.system_prompt_draft)
-        else:
-            st.caption("暂无内容")
+            if not preview_prompt:
+                editor_key = (
+                    f"system_prompt_editor_{current_session.id}_"
+                    f"{st.session_state.get('system_prompt_editor_nonce', 0)}"
+                )
+                editor_value = st.text_area(
+                    "系统提示词",
+                    height=180,
+                    value=st.session_state.system_prompt_draft,
+                    key=editor_key,
+                )
+                st.session_state.system_prompt_editor_active_key = editor_key
+                st.session_state.system_prompt_draft = editor_value
+            elif st.session_state.system_prompt_draft.strip():
+                st.markdown(st.session_state.system_prompt_draft)
+            else:
+                st.caption("暂无内容")
+
+        with global_prompt_tab:
+            st.caption("新建会话会默认使用这里的系统提示词，后续每个会话仍可单独修改。")
+            with st.form("global_system_prompt_form"):
+                global_prompt_value = st.text_area(
+                    "全局默认系统提示词",
+                    height=180,
+                    value=st.session_state.global_system_prompt_draft,
+                )
+                global_prompt_submitted = st.form_submit_button("保存全局默认提示词", use_container_width=True)
+
+            if global_prompt_submitted:
+                try:
+                    update_global_system_prompt(database_url, global_prompt_value)
+                    st.session_state.global_system_prompt_draft = global_prompt_value.strip() or global_system_prompt
+                    st.success("全局默认提示词已保存。")
+                    st.rerun()
+                except AppSettingsStorageError as exc:
+                    st.error(f"保存失败：{exc}")
 
     with model_tab:
         st.subheader("模型")
