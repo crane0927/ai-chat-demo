@@ -1,5 +1,8 @@
 # ======== 第三方库：Streamlit ========
 
+import json
+import re
+
 import streamlit as st
 # streamlit 是用来快速写 Web 页面（特别适合 AI Demo）
 
@@ -30,12 +33,20 @@ from services.model_config import (
     update_model_config,
 )
 from services.session import (
+    ChatMessage,
+    ChatSession,
+    SessionStorageError,
+    append_session_message,
+    build_model_messages,
     create_session,
-    delete_active_session,
-    get_current_messages,
-    get_current_system_prompt,
-    init_session_state,
-    sync_system_prompt,
+    delete_session,
+    ensure_default_session,
+    get_session,
+    init_session_db,
+    list_session_messages,
+    list_sessions,
+    rename_session,
+    update_session_system_prompt,
     visible_messages as get_visible_messages,
 )
 from ui.components import answer_source_html, render_app_header, render_assistant_message
@@ -72,6 +83,67 @@ def build_model_config_input(
         max_retries=int(max_retries),
         enabled=enabled,
     )
+
+
+def build_session_markdown(session: ChatSession, messages: list[ChatMessage]) -> str:
+    lines = [
+        f"# {session.title}",
+        "",
+        f"- 会话 ID：{session.id}",
+        f"- 创建时间：{session.created_at.strftime('%Y-%m-%d %H:%M:%S %Z')}",
+        f"- 更新时间：{session.updated_at.strftime('%Y-%m-%d %H:%M:%S %Z')}",
+        "",
+        "## 系统提示词",
+        "",
+        session.system_prompt.strip() or "（空）",
+        "",
+        "## 对话记录",
+        "",
+    ]
+
+    for message in messages:
+        role_label = "用户" if message.role == "user" else "助手"
+        lines.append(f"### {role_label}")
+        lines.append("")
+        lines.append(message.content)
+        if message.source:
+            lines.append("")
+            lines.append(f"> 回答来源：{message.source}")
+        lines.append("")
+
+    return "\n".join(lines).strip() + "\n"
+
+
+def build_session_json(session: ChatSession, messages: list[ChatMessage]) -> str:
+    export_payload = {
+        "session": {
+            "id": session.id,
+            "title": session.title,
+            "system_prompt": session.system_prompt,
+            "created_at": session.created_at.isoformat(),
+            "updated_at": session.updated_at.isoformat(),
+            "message_count": session.message_count,
+        },
+        "messages": [
+            {
+                "id": message.id,
+                "role": message.role,
+                "content": message.content,
+                "source": message.source,
+                "sort_order": message.sort_order,
+                "created_at": message.created_at.isoformat(),
+            }
+            for message in messages
+        ],
+    }
+    return json.dumps(export_payload, ensure_ascii=False, indent=2)
+
+
+def build_session_export_filename(session: ChatSession, suffix: str) -> str:
+    # 下载文件名只保留常见安全字符，避免不同系统下出现路径或编码问题。
+    safe_title = re.sub(r"[^\w\u4e00-\u9fff-]+", "-", session.title.strip(), flags=re.UNICODE)
+    safe_title = safe_title.strip("-_") or f"session-{session.id}"
+    return f"{safe_title}.{suffix}"
 
 
 # ======== Streamlit 页面基础设置 ========
@@ -309,25 +381,51 @@ st.markdown(
 )
 
 
-# ======== 会话管理（多会话） ========
-
-init_session_state(st.session_state)
-
-
-# ======== 模型配置数据库 ========
+# ======== PostgreSQL 数据库 ========
 
 database_url = get_database_url()
 try:
+    init_session_db(database_url)
+    ensure_default_session(database_url)
     init_model_config_db(database_url)
     ensure_default_model_config(database_url, get_env_api_key())
+    sessions = list_sessions(database_url)
     model_configs = list_model_configs(database_url)
+except SessionStorageError as exc:
+    st.error(f"聊天记录数据库不可用：{exc}")
+    st.info("请确认 PostgreSQL 已启动，并设置 APP_DATABASE_URL 或 DATABASE_URL。")
+    st.stop()
 except ModelConfigStorageError as exc:
     # 数据库不可用时停止渲染后续聊天逻辑，避免用户误以为模型配置已经保存。
     st.error(f"模型配置数据库不可用：{exc}")
     st.info("请确认 PostgreSQL 已启动，并设置 APP_DATABASE_URL 或 DATABASE_URL。")
     st.stop()
 
+sessions_by_id = {session.id: session for session in sessions}
 model_configs_by_id = {config.id: config for config in model_configs}
+
+if "active_session_id" not in st.session_state or st.session_state.active_session_id not in sessions_by_id:
+    # 会话删除或首次访问时，默认指向最近更新的一条会话。
+    st.session_state.active_session_id = sessions[0].id if sessions else None
+
+if "system_prompt_session_id" not in st.session_state:
+    st.session_state.system_prompt_session_id = st.session_state.active_session_id
+
+if "rename_session_confirming_id" not in st.session_state:
+    st.session_state.rename_session_confirming_id = None
+
+pending_active_session_id = st.session_state.pop("pending_active_session_id", None)
+if pending_active_session_id in sessions_by_id:
+    st.session_state.active_session_id = pending_active_session_id
+
+if (
+    "active_session_selector_id" not in st.session_state
+    or st.session_state.active_session_selector_id not in sessions_by_id
+):
+    st.session_state.active_session_selector_id = st.session_state.active_session_id
+elif st.session_state.active_session_selector_id != st.session_state.active_session_id:
+    # 会话切换来自侧边栏下拉框；这里先同步到全局当前会话，再由后续逻辑更新提示词和消息内容。
+    st.session_state.active_session_id = st.session_state.active_session_selector_id
 
 if (
     "selected_model_config_id" not in st.session_state
@@ -354,6 +452,20 @@ if "delete_model_config_confirming_id" not in st.session_state:
     st.session_state.delete_model_config_confirming_id = None
 
 selected_model_config = model_configs_by_id[st.session_state.selected_model_config_id]
+current_session = sessions_by_id.get(st.session_state.active_session_id)
+
+if current_session is None:
+    st.error("未找到当前会话，请刷新页面重试。")
+    st.stop()
+
+if st.session_state.system_prompt_session_id != current_session.id:
+    # 切换会话时，把输入框内容切到对应会话的提示词，避免上一条会话的内容覆盖当前会话。
+    st.session_state.system_prompt_input = current_session.system_prompt
+    st.session_state.system_prompt_session_id = current_session.id
+elif "system_prompt_input" not in st.session_state:
+    st.session_state.system_prompt_input = current_session.system_prompt
+
+current_session_messages = list_session_messages(database_url, current_session.id)
 
 
 @st.dialog("确认删除模型配置", width="small")
@@ -392,6 +504,37 @@ def render_delete_model_config_dialog(config_id: int) -> None:
 
 if st.session_state.delete_model_config_confirming_id in model_configs_by_id:
     render_delete_model_config_dialog(st.session_state.delete_model_config_confirming_id)
+
+
+@st.dialog("重命名会话", width="small")
+def render_rename_session_dialog(session_id: int) -> None:
+    session = get_session(database_url, session_id)
+    if session is None:
+        st.session_state.rename_session_confirming_id = None
+        st.rerun()
+
+    with st.form(f"rename_session_form_{session_id}"):
+        new_title = st.text_input("会话名称", value=session.title)
+        submitted = st.form_submit_button("保存名称", use_container_width=True)
+
+    if submitted:
+        if not new_title.strip():
+            st.error("会话名称不能为空。")
+        else:
+            try:
+                rename_session(database_url, session_id, new_title)
+                st.session_state.rename_session_confirming_id = None
+                st.rerun()
+            except SessionStorageError as exc:
+                st.error(f"重命名失败：{exc}")
+
+    if st.button("取消", key=f"cancel_rename_session_{session_id}", use_container_width=True):
+        st.session_state.rename_session_confirming_id = None
+        st.rerun()
+
+
+if st.session_state.rename_session_confirming_id in sessions_by_id:
+    render_rename_session_dialog(st.session_state.rename_session_confirming_id)
 
 
 @st.dialog("设置", width="large")
@@ -624,40 +767,64 @@ with st.sidebar:
     # with st.sidebar 表示：下面缩进的内容都显示在侧边栏
 
     st.title("会话")
-    st.caption("选择、创建或删除对话。")
-
-    session_names = list(st.session_state.sessions.keys())
-    previous_session = st.session_state.active_session
+    st.caption("选择、创建、重命名和导出对话。")
 
     st.selectbox(
         "当前会话",
-        session_names,
-        key="active_session"
+        list(sessions_by_id.keys()),
+        key="active_session_selector_id",
+        format_func=lambda session_id: sessions_by_id[session_id].title,
     )
 
-    if st.session_state.active_session != previous_session:
-        st.session_state.system_prompt_input = get_current_system_prompt(st.session_state)
-
-    col_new, col_del = st.columns(2)
+    col_new, col_rename, col_del = st.columns(3)
 
     with col_new:
-        st.button(
-            "新建",
-            use_container_width=True,
-            on_click=create_session,
-            args=(st.session_state,),
-        )
+        if st.button("新建", use_container_width=True):
+            try:
+                new_session_id = create_session(database_url)
+                st.session_state.pending_active_session_id = new_session_id
+                st.session_state.active_session_selector_id = new_session_id
+                st.rerun()
+            except SessionStorageError as exc:
+                st.error(f"创建失败：{exc}")
+
+    with col_rename:
+        if st.button("重命名", use_container_width=True):
+            st.session_state.rename_session_confirming_id = st.session_state.active_session_id
+            st.rerun()
 
     with col_del:
-        st.button(
-            "删除",
-            disabled=len(st.session_state.sessions) <= 1,
-            use_container_width=True,
-            on_click=delete_active_session,
-            args=(st.session_state,),
-        )
+        if st.button("删除", disabled=len(sessions) <= 1, use_container_width=True):
+            try:
+                deleting_session_id = st.session_state.active_session_id
+                delete_session(database_url, deleting_session_id)
+                remaining_sessions = list_sessions(database_url)
+                next_session_id = remaining_sessions[0].id if remaining_sessions else None
+                st.session_state.pending_active_session_id = next_session_id
+                st.session_state.active_session_selector_id = next_session_id
+                st.rerun()
+            except SessionStorageError as exc:
+                st.error(f"删除失败：{exc}")
 
-    st.caption(f"当前共有 {len(st.session_state.sessions)} 个会话。")
+    session_markdown = build_session_markdown(current_session, current_session_messages)
+    session_json = build_session_json(current_session, current_session_messages)
+
+    st.download_button(
+        "导出 Markdown",
+        data=session_markdown,
+        file_name=build_session_export_filename(current_session, "md"),
+        mime="text/markdown",
+        use_container_width=True,
+    )
+    st.download_button(
+        "导出 JSON",
+        data=session_json,
+        file_name=build_session_export_filename(current_session, "json"),
+        mime="application/json",
+        use_container_width=True,
+    )
+
+    st.caption(f"当前共有 {len(sessions)} 个会话。")
 
 
 # 设置弹窗中的组件会更新 session_state；后续渲染前重新读取，确保顶部状态和请求参数一致。
@@ -666,13 +833,15 @@ selected_model_config = model_configs_by_id[st.session_state.selected_model_conf
 
 # ======== 当前会话消息 ========
 
-messages = get_current_messages(st.session_state)
-
-
-# ======== 同步 system prompt（侧边栏修改后生效） ========
-
-system_prompt = st.session_state.system_prompt_input
-sync_system_prompt(messages, system_prompt)
+messages = current_session_messages
+system_prompt = st.session_state.system_prompt_input.strip() or current_session.system_prompt
+if system_prompt != current_session.system_prompt:
+    try:
+        update_session_system_prompt(database_url, current_session.id, system_prompt)
+        current_session = get_session(database_url, current_session.id) or current_session
+    except SessionStorageError as exc:
+        st.error(f"保存提示词失败：{exc}")
+        st.stop()
 
 
 # ======== 顶部状态区域 ========
@@ -689,7 +858,7 @@ header_slot = st.empty()
 # 顶部状态需要在用户发送消息后即时重绘，所以先用占位容器承载。
 render_app_header(
     header_slot,
-    st.session_state.active_session,
+    current_session.title,
     mode_label,
     selected_model_config.model_name,
     len(visible_messages),
@@ -715,11 +884,11 @@ if not visible_messages:
 for msg in visible_messages:
     # system 消息不显示在聊天窗口
     # 根据 role（user / assistant）显示不同样式
-    with st.chat_message(msg["role"]):
-        if msg["role"] == "assistant":
-            render_assistant_message(msg["content"], msg.get("source"))
+    with st.chat_message(msg.role):
+        if msg.role == "assistant":
+            render_assistant_message(msg.content, msg.source)
         else:
-            st.markdown(msg["content"])
+            st.markdown(msg.content)
 
 
 # ======== 聊天输入框 ========
@@ -743,10 +912,7 @@ if prompt:
     )
     empty_state_slot.empty()
 
-    # 1. 记录用户消息
-    messages.append(
-        {"role": "user", "content": prompt}
-    )
+    conversation_messages = build_model_messages(system_prompt, messages)
 
     # 2. 显示用户消息
     with st.chat_message("user"):
@@ -759,7 +925,7 @@ if prompt:
             answer_box = st.empty()
             answer = ""
             for chunk in openai_stream_response(
-                messages,
+                conversation_messages + [{"role": "user", "content": prompt}],
                 selected_model_config.temperature,
                 selected_model_config.api_key,
                 selected_model_config.model_name,
@@ -774,16 +940,19 @@ if prompt:
             answer = local_fallback_response(prompt)
             render_assistant_message(answer, answer_source)
 
-    # 4. 保存 AI 回复
-    messages.append(
-        {"role": "assistant", "content": answer, "source": answer_source}
-    )
+    try:
+        # 先保存用户消息，再保存助手回复，保证数据库中的顺序和页面展示一致。
+        append_session_message(database_url, current_session.id, "user", prompt)
+        append_session_message(database_url, current_session.id, "assistant", answer, answer_source)
+    except SessionStorageError as exc:
+        st.error(f"保存聊天记录失败：{exc}")
+        st.stop()
 
     # 消息数在本轮脚本执行中发生变化，立即重绘顶部统计。
     render_app_header(
         header_slot,
-        st.session_state.active_session,
+        current_session.title,
         mode_label,
         selected_model_config.model_name,
-        len([msg for msg in messages if msg["role"] != "system"]),
+        len(messages) + 2,
     )
