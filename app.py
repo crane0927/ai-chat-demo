@@ -341,7 +341,57 @@ if pending_model_config_id in model_configs_by_id:
     # 表单提交后不能在同一轮修改已实例化的小组件 key，因此把切换动作延迟到下一轮脚本执行。
     st.session_state.selected_model_config_id = pending_model_config_id
 
+if (
+    "selected_model_config_selector_id" not in st.session_state
+    or st.session_state.selected_model_config_selector_id not in model_configs_by_id
+):
+    st.session_state.selected_model_config_selector_id = st.session_state.selected_model_config_id
+elif st.session_state.selected_model_config_selector_id != st.session_state.selected_model_config_id:
+    # 模型下拉切换通常发生在设置弹窗里，但交互后会触发整页重跑；这里把弹窗选择同步回全局当前模型。
+    st.session_state.selected_model_config_id = st.session_state.selected_model_config_selector_id
+
+if "delete_model_config_confirming_id" not in st.session_state:
+    st.session_state.delete_model_config_confirming_id = None
+
 selected_model_config = model_configs_by_id[st.session_state.selected_model_config_id]
+
+
+@st.dialog("确认删除模型配置", width="small")
+def render_delete_model_config_dialog(config_id: int) -> None:
+    current_config = model_configs_by_id.get(config_id)
+    if current_config is None:
+        st.session_state.delete_model_config_confirming_id = None
+        st.rerun()
+
+    st.write(f"确认删除模型配置“{current_config.name}”吗？删除后无法恢复。")
+    confirm_col, cancel_col = st.columns(2)
+
+    with confirm_col:
+        if st.button(
+            "确认删除",
+            type="primary",
+            use_container_width=True,
+            key=f"delete_model_config_confirm_{config_id}",
+        ):
+            try:
+                delete_model_config(database_url, config_id)
+                st.session_state.delete_model_config_confirming_id = None
+                st.rerun()
+            except ModelConfigStorageError as exc:
+                st.error(f"删除失败：{exc}")
+
+    with cancel_col:
+        if st.button(
+            "取消",
+            use_container_width=True,
+            key=f"delete_model_config_cancel_{config_id}",
+        ):
+            st.session_state.delete_model_config_confirming_id = None
+            st.rerun()
+
+
+if st.session_state.delete_model_config_confirming_id in model_configs_by_id:
+    render_delete_model_config_dialog(st.session_state.delete_model_config_confirming_id)
 
 
 @st.dialog("设置", width="large")
@@ -376,7 +426,7 @@ def render_settings_dialog() -> None:
         selected_model_config_id = st.selectbox(
             "当前模型配置",
             list(model_configs_by_id.keys()),
-            key="selected_model_config_id",
+            key="selected_model_config_selector_id",
             format_func=lambda config_id: model_config_label(model_configs_by_id[config_id]),
             help="切换后，下一次提问会使用所选模型配置。",
         )
@@ -472,17 +522,14 @@ def render_settings_dialog() -> None:
                     except ModelConfigStorageError as exc:
                         st.error(f"保存失败：{exc}")
 
-            confirm_delete = st.checkbox("确认删除当前配置")
             if st.button(
                 "删除当前配置",
-                disabled=len(model_configs) <= 1 or not confirm_delete,
+                disabled=len(model_configs) <= 1,
                 use_container_width=True,
+                key=f"delete_model_config_trigger_{current_config.id}",
             ):
-                try:
-                    delete_model_config(database_url, current_config.id)
-                    st.rerun()
-                except ModelConfigStorageError as exc:
-                    st.error(f"删除失败：{exc}")
+                st.session_state.delete_model_config_confirming_id = current_config.id
+                st.rerun()
 
         with new_tab:
             with st.form("new_model_config_form"):
@@ -560,6 +607,7 @@ def render_settings_dialog() -> None:
                             ),
                         )
                         st.session_state.pending_selected_model_config_id = new_config_id
+                        st.session_state.selected_model_config_selector_id = new_config_id
                         st.success("模型配置已创建。")
                         st.rerun()
                     except DuplicateModelConfigName as exc:
