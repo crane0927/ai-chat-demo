@@ -417,6 +417,8 @@ if "rename_session_confirming_id" not in st.session_state:
 pending_active_session_id = st.session_state.pop("pending_active_session_id", None)
 if pending_active_session_id in sessions_by_id:
     st.session_state.active_session_id = pending_active_session_id
+    # 这里发生在会话下拉框实例化之前，可以安全同步选中项，避免后续被旧的 selector 状态反向覆盖。
+    st.session_state.active_session_selector_id = pending_active_session_id
 
 if (
     "active_session_selector_id" not in st.session_state
@@ -453,17 +455,34 @@ if "delete_model_config_confirming_id" not in st.session_state:
 
 selected_model_config = model_configs_by_id[st.session_state.selected_model_config_id]
 current_session = sessions_by_id.get(st.session_state.active_session_id)
+current_preview_prompt = st.session_state.get("preview_prompt", True)
+previous_preview_prompt = st.session_state.get("previous_preview_prompt", current_preview_prompt)
 
 if current_session is None:
     st.error("未找到当前会话，请刷新页面重试。")
     st.stop()
 
+legacy_system_prompt_input = st.session_state.pop("system_prompt_input", "")
+
 if st.session_state.system_prompt_session_id != current_session.id:
     # 切换会话时，把输入框内容切到对应会话的提示词，避免上一条会话的内容覆盖当前会话。
-    st.session_state.system_prompt_input = current_session.system_prompt
+    st.session_state.system_prompt_draft = current_session.system_prompt
     st.session_state.system_prompt_session_id = current_session.id
-elif "system_prompt_input" not in st.session_state:
-    st.session_state.system_prompt_input = current_session.system_prompt
+    st.session_state.system_prompt_editor_nonce = 0
+else:
+    if "system_prompt_draft" not in st.session_state:
+        st.session_state.system_prompt_draft = legacy_system_prompt_input or current_session.system_prompt
+    if not current_preview_prompt and previous_preview_prompt:
+        # 从预览切回编辑时刷新编辑器 key，强制文本框以当前草稿重新初始化，避免旧组件状态把内容清空。
+        st.session_state.system_prompt_editor_nonce = st.session_state.get("system_prompt_editor_nonce", 0) + 1
+    elif current_preview_prompt and not previous_preview_prompt:
+        active_editor_key = st.session_state.get("system_prompt_editor_active_key")
+        if active_editor_key and active_editor_key in st.session_state:
+            st.session_state.system_prompt_draft = st.session_state[active_editor_key]
+    if current_preview_prompt and not st.session_state.system_prompt_draft and current_session.system_prompt:
+        st.session_state.system_prompt_draft = current_session.system_prompt
+
+st.session_state.previous_preview_prompt = current_preview_prompt
 
 current_session_messages = list_session_messages(database_url, current_session.id)
 
@@ -553,13 +572,20 @@ def render_settings_dialog() -> None:
         st.caption("系统提示词支持 Markdown，可编写角色、规则、列表和示例。")
 
         if not preview_prompt:
-            st.text_area(
+            editor_key = (
+                f"system_prompt_editor_{current_session.id}_"
+                f"{st.session_state.get('system_prompt_editor_nonce', 0)}"
+            )
+            editor_value = st.text_area(
                 "系统提示词",
                 height=180,
-                key="system_prompt_input",
+                value=st.session_state.system_prompt_draft,
+                key=editor_key,
             )
-        elif st.session_state.system_prompt_input.strip():
-            st.markdown(st.session_state.system_prompt_input)
+            st.session_state.system_prompt_editor_active_key = editor_key
+            st.session_state.system_prompt_draft = editor_value
+        elif st.session_state.system_prompt_draft.strip():
+            st.markdown(st.session_state.system_prompt_draft)
         else:
             st.caption("暂无内容")
 
@@ -782,8 +808,8 @@ with st.sidebar:
         if st.button("新建", use_container_width=True):
             try:
                 new_session_id = create_session(database_url)
+                # 会话下拉框已经实例化后不能在同一轮直接改它的 key，这里先暂存目标会话，下一轮脚本再同步选中项。
                 st.session_state.pending_active_session_id = new_session_id
-                st.session_state.active_session_selector_id = new_session_id
                 st.rerun()
             except SessionStorageError as exc:
                 st.error(f"创建失败：{exc}")
@@ -801,7 +827,6 @@ with st.sidebar:
                 remaining_sessions = list_sessions(database_url)
                 next_session_id = remaining_sessions[0].id if remaining_sessions else None
                 st.session_state.pending_active_session_id = next_session_id
-                st.session_state.active_session_selector_id = next_session_id
                 st.rerun()
             except SessionStorageError as exc:
                 st.error(f"删除失败：{exc}")
@@ -834,7 +859,7 @@ selected_model_config = model_configs_by_id[st.session_state.selected_model_conf
 # ======== 当前会话消息 ========
 
 messages = current_session_messages
-system_prompt = st.session_state.system_prompt_input.strip() or current_session.system_prompt
+system_prompt = st.session_state.system_prompt_draft.strip() or current_session.system_prompt
 if system_prompt != current_session.system_prompt:
     try:
         update_session_system_prompt(database_url, current_session.id, system_prompt)
