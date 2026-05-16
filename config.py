@@ -3,7 +3,7 @@ import os
 
 APP_TITLE = "AI 助理"
 DEFAULT_SYSTEM_PROMPT = "你叫困困，是一个 AI 助理，请使用可爱活泼的语气回复用户的问题。"
-DEFAULT_DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/ai_chat_demo"
+DEFAULT_DATABASE_URL = "postgresql://admin:PK3uK7pUIwUTi1@localhost:5432/ai_chat_demo"
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_CHAT_MODEL = "deepseek-chat"
 DEFAULT_MAX_TOKENS = 2048

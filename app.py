@@ -1,8 +1,3 @@
-# ======== 第三方库：Streamlit ========
-
-import json
-import re
-
 import streamlit as st
 # streamlit 是用来快速写 Web 页面（特别适合 AI Demo）
 
@@ -14,11 +9,17 @@ from config import (
     get_database_url,
     get_env_api_key,
 )
+from pages.settings_dialog import (
+    render_create_session_dialog,
+    render_delete_model_config_dialog,
+    render_rename_session_dialog,
+    render_settings_dialog,
+)
+from pages.sidebar import render_sidebar
 from services.app_settings import (
     AppSettingsStorageError,
     get_global_system_prompt,
     init_app_settings_db,
-    update_global_system_prompt,
 )
 from services.llm import (
     ModelRequestOptions,
@@ -27,170 +28,38 @@ from services.llm import (
     openai_stream_response,
 )
 from services.model_config import (
-    DuplicateModelConfigName,
-    ModelConfig,
-    ModelConfigInput,
     ModelConfigStorageError,
-    create_model_config,
-    delete_model_config,
     ensure_default_model_config,
     init_model_config_db,
     list_model_configs,
-    update_model_config,
 )
 from services.prompt_template import (
-    DuplicatePromptTemplateName,
-    PromptTemplate,
-    PromptTemplateInput,
     PromptTemplateStorageError,
-    create_prompt_template,
-    delete_prompt_template,
     ensure_default_prompt_templates,
-    extract_template_variables,
     init_prompt_template_db,
     list_prompt_templates,
-    render_prompt_template,
-    update_prompt_template,
 )
 from services.session import (
-    ChatMessage,
-    ChatSession,
     SessionStorageError,
     append_session_message,
     build_model_messages,
-    create_session,
-    delete_session,
     ensure_session_model_config,
     ensure_default_session,
     get_session,
     init_session_db,
     list_session_messages,
     list_sessions,
-    rename_session,
     update_session_model_config,
     update_session_system_prompt,
     visible_messages as get_visible_messages,
 )
+from state.session_state import (
+    ensure_base_state,
+    sync_prompt_selection_state,
+    sync_system_prompt_state,
+)
 from ui.components import answer_source_html, render_app_header, render_assistant_message
-
-
-def model_config_label(config: ModelConfig) -> str:
-    disabled_label = "（已停用）" if not config.enabled else ""
-    return f"{config.name}{disabled_label}"
-
-
-def build_model_config_input(
-    name: str,
-    provider: str,
-    api_key: str,
-    base_url: str,
-    model_name: str,
-    temperature: float,
-    max_tokens: int,
-    context_message_limit: int,
-    timeout_seconds: float,
-    max_retries: int,
-    enabled: bool,
-) -> ModelConfigInput:
-    return ModelConfigInput(
-        name=name,
-        provider=provider,
-        api_key=api_key,
-        base_url=base_url,
-        model_name=model_name,
-        temperature=float(temperature),
-        max_tokens=int(max_tokens),
-        context_message_limit=int(context_message_limit),
-        timeout_seconds=float(timeout_seconds),
-        max_retries=int(max_retries),
-        enabled=enabled,
-    )
-
-
-def build_session_markdown(session: ChatSession, messages: list[ChatMessage]) -> str:
-    lines = [
-        f"# {session.title}",
-        "",
-        f"- 会话 ID：{session.id}",
-        f"- 创建时间：{session.created_at.strftime('%Y-%m-%d %H:%M:%S %Z')}",
-        f"- 更新时间：{session.updated_at.strftime('%Y-%m-%d %H:%M:%S %Z')}",
-        "",
-        "## 系统提示词",
-        "",
-        session.system_prompt.strip() or "（空）",
-        "",
-        "## 对话记录",
-        "",
-    ]
-
-    for message in messages:
-        role_label = "用户" if message.role == "user" else "助手"
-        lines.append(f"### {role_label}")
-        lines.append("")
-        lines.append(message.content)
-        if message.source:
-            lines.append("")
-            lines.append(f"> 回答来源：{message.source}")
-        lines.append("")
-
-    return "\n".join(lines).strip() + "\n"
-
-
-def build_session_json(session: ChatSession, messages: list[ChatMessage]) -> str:
-    export_payload = {
-        "session": {
-            "id": session.id,
-            "title": session.title,
-            "system_prompt": session.system_prompt,
-            "created_at": session.created_at.isoformat(),
-            "updated_at": session.updated_at.isoformat(),
-            "message_count": session.message_count,
-        },
-        "messages": [
-            {
-                "id": message.id,
-                "role": message.role,
-                "content": message.content,
-                "source": message.source,
-                "sort_order": message.sort_order,
-                "created_at": message.created_at.isoformat(),
-            }
-            for message in messages
-        ],
-    }
-    return json.dumps(export_payload, ensure_ascii=False, indent=2)
-
-
-def build_session_export_filename(session: ChatSession, suffix: str) -> str:
-    # 下载文件名只保留常见安全字符，避免不同系统下出现路径或编码问题。
-    safe_title = re.sub(r"[^\w\u4e00-\u9fff-]+", "-", session.title.strip(), flags=re.UNICODE)
-    safe_title = safe_title.strip("-_") or f"session-{session.id}"
-    return f"{safe_title}.{suffix}"
-
-
-def prompt_template_label(template: PromptTemplate) -> str:
-    builtin_label = "（内置）" if template.builtin else ""
-    return f"{template.name}{builtin_label}"
-
-
-def build_prompt_template_input(name: str, description: str, content: str) -> PromptTemplateInput:
-    return PromptTemplateInput(
-        name=name,
-        description=description,
-        content=content,
-        builtin=False,
-    )
-
-
-def build_template_copy_name(existing_templates: list[PromptTemplate], source_name: str) -> str:
-    existing_names = {template.name for template in existing_templates}
-    if f"{source_name} 副本" not in existing_names:
-        return f"{source_name} 副本"
-
-    index = 2
-    while f"{source_name} 副本 {index}" in existing_names:
-        index += 1
-    return f"{source_name} 副本 {index}"
+from ui.styles import inject_app_styles
 
 
 # ======== Streamlit 页面基础设置 ========
@@ -200,232 +69,7 @@ st.set_page_config(
     page_icon="💬",         # 标签页图标
     layout="wide"           # 页面宽屏显示
 )
-
-st.markdown(
-    """
-    <style>
-        /* 使用 Streamlit 主题变量，保证浅色和深色模式下都能保持可读。 */
-        :root {
-            --app-bg: var(--background-color);
-            --panel-bg: var(--secondary-background-color);
-            --panel-border: rgba(128, 128, 128, 0.26);
-            --text-main: var(--text-color);
-            --text-muted: color-mix(in srgb, var(--text-color) 62%, transparent);
-            --accent: var(--primary-color);
-            --accent-soft: color-mix(in srgb, var(--primary-color) 16%, transparent);
-        }
-
-        .stApp {
-            background:
-                radial-gradient(circle at top left, var(--accent-soft), transparent 28rem),
-                linear-gradient(180deg, var(--app-bg) 0%, var(--panel-bg) 100%);
-            color: var(--text-main);
-        }
-
-        [data-testid="stHeader"] {
-            background: transparent;
-        }
-
-        .block-container {
-            max-width: 1040px;
-            padding-top: 2rem;
-            padding-bottom: 6rem;
-        }
-
-        section[data-testid="stSidebar"] > div {
-            background: var(--panel-bg);
-            border-right: 1px solid var(--panel-border);
-            padding-top: 1.6rem;
-        }
-
-        section[data-testid="stSidebar"] h1,
-        section[data-testid="stSidebar"] h2,
-        section[data-testid="stSidebar"] h3 {
-            color: var(--text-main);
-            letter-spacing: 0;
-        }
-
-        .app-hero {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
-            align-items: end;
-            gap: 1.25rem;
-            margin-bottom: 1.4rem;
-            padding-bottom: 1.2rem;
-            border-bottom: 1px solid var(--panel-border);
-        }
-
-        .app-kicker {
-            color: var(--accent);
-            font-size: 0.82rem;
-            font-weight: 700;
-            margin: 0 0 0.35rem;
-        }
-
-        .app-title {
-            color: var(--text-main);
-            font-size: 2.3rem;
-            line-height: 1.12;
-            font-weight: 760;
-            margin: 0;
-            letter-spacing: 0;
-        }
-
-        .app-subtitle {
-            color: var(--text-muted);
-            font-size: 0.98rem;
-            margin: 0.55rem 0 0;
-        }
-
-        .status-strip {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: flex-end;
-            gap: 0.5rem;
-            min-width: 18rem;
-        }
-
-        .status-pill {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.35rem;
-            padding: 0.42rem 0.7rem;
-            border-radius: 999px;
-            border: 1px solid var(--panel-border);
-            background: color-mix(in srgb, var(--panel-bg) 92%, transparent);
-            color: var(--text-muted);
-            font-size: 0.82rem;
-            font-weight: 650;
-            white-space: nowrap;
-        }
-
-        .status-pill strong {
-            color: var(--text-main);
-            font-weight: 760;
-        }
-
-        .empty-state {
-            max-width: 560px;
-            margin: 1.4rem auto 0;
-            padding: 1.15rem 1.25rem;
-            border: 1px solid var(--panel-border);
-            border-radius: 8px;
-            background: color-mix(in srgb, var(--panel-bg) 90%, transparent);
-            box-shadow: 0 10px 26px rgba(15, 23, 42, 0.05);
-        }
-
-        .empty-state h2 {
-            margin: 0 0 0.4rem;
-            color: var(--text-main);
-            font-size: 1.05rem;
-            letter-spacing: 0;
-        }
-
-        .empty-state p {
-            margin: 0;
-            color: var(--text-muted);
-            font-size: 0.86rem;
-        }
-
-        [data-testid="stChatMessage"] {
-            border: 1px solid var(--panel-border);
-            border-radius: 8px;
-            background: color-mix(in srgb, var(--panel-bg) 92%, transparent);
-            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05);
-            padding: calc(0.85rem + 10px) 1rem;
-            margin-bottom: 0.85rem;
-            overflow: hidden;
-        }
-
-        [data-testid="stChatMessage"] p {
-            line-height: 1.72;
-        }
-
-        div[data-testid="stChatInput"] {
-            border-top: 1px solid var(--panel-border);
-            background: color-mix(in srgb, var(--app-bg) 88%, transparent);
-            backdrop-filter: blur(10px);
-        }
-
-        div[data-testid="stTextInput"] input,
-        div[data-testid="stTextArea"] textarea {
-            border-radius: 8px;
-        }
-
-        div[data-testid="stButton"] button {
-            border-radius: 8px;
-            font-weight: 650;
-        }
-
-        .answer-source-row {
-            display: flex;
-            width: 100%;
-            min-width: 0;
-            margin-top: 0.55rem;
-            box-sizing: border-box;
-        }
-
-        /* 来源标签需要被限制在聊天卡片内部，避免长模型名撑破容器。 */
-        .answer-source {
-            display: inline-flex;
-            align-items: center;
-            max-width: 100%;
-            padding: 0.28rem 0.55rem;
-            border-radius: 999px;
-            border: 1px solid var(--panel-border);
-            background: color-mix(in srgb, var(--panel-bg) 92%, transparent);
-            color: var(--text-muted);
-            font-size: 0.76rem;
-            font-weight: 650;
-            line-height: 1.4;
-            overflow-wrap: anywhere;
-            white-space: normal;
-            box-sizing: border-box;
-        }
-
-        .sidebar-note {
-            color: var(--text-muted);
-            font-size: 0.82rem;
-            line-height: 1.55;
-            padding: 0.7rem 0.8rem;
-            border-radius: 8px;
-            background: color-mix(in srgb, var(--panel-bg) 92%, transparent);
-            border: 1px solid var(--panel-border);
-        }
-
-        div[data-testid="stCheckbox"] {
-            position: relative;
-        }
-
-        div[data-testid="stCheckbox"] [id$="__anchor"] {
-            position: absolute;
-            top: 0.12rem;
-            right: 0;
-        }
-
-        @media (max-width: 760px) {
-            .block-container {
-                padding-top: 1.2rem;
-            }
-
-            .app-hero {
-                grid-template-columns: 1fr;
-                align-items: start;
-            }
-
-            .status-strip {
-                justify-content: flex-start;
-                min-width: 0;
-            }
-
-            .app-title {
-                font-size: 1.9rem;
-            }
-        }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+inject_app_styles()
 
 
 # ======== PostgreSQL 数据库 ========
@@ -471,51 +115,17 @@ except PromptTemplateStorageError as exc:
     st.stop()
 
 sessions_by_id = {session.id: session for session in sessions}
-
-if "active_session_id" not in st.session_state or st.session_state.active_session_id not in sessions_by_id:
-    # 会话删除或首次访问时，默认指向最近更新的一条会话。
-    st.session_state.active_session_id = sessions[0].id if sessions else None
-
-if "system_prompt_session_id" not in st.session_state:
-    st.session_state.system_prompt_session_id = st.session_state.active_session_id
-
-if "rename_session_confirming_id" not in st.session_state:
-    st.session_state.rename_session_confirming_id = None
-
-pending_active_session_id = st.session_state.pop("pending_active_session_id", None)
-if pending_active_session_id in sessions_by_id:
-    st.session_state.active_session_id = pending_active_session_id
-    # 这里发生在会话下拉框实例化之前，可以安全同步选中项，避免后续被旧的 selector 状态反向覆盖。
-    st.session_state.active_session_selector_id = pending_active_session_id
-
-if (
-    "active_session_selector_id" not in st.session_state
-    or st.session_state.active_session_selector_id not in sessions_by_id
-):
-    st.session_state.active_session_selector_id = st.session_state.active_session_id
-elif st.session_state.active_session_selector_id != st.session_state.active_session_id:
-    # 会话切换来自侧边栏下拉框；这里先同步到全局当前会话，再由后续逻辑更新提示词和消息内容。
-    st.session_state.active_session_id = st.session_state.active_session_selector_id
-
-if "delete_model_config_confirming_id" not in st.session_state:
-    st.session_state.delete_model_config_confirming_id = None
-
-if prompt_templates and "selected_prompt_template_id" not in st.session_state:
-    st.session_state.selected_prompt_template_id = prompt_templates[0].id
+ensure_base_state(
+    state=st.session_state,
+    sessions_by_id=sessions_by_id,
+    prompt_templates_by_id=prompt_templates_by_id,
+    global_system_prompt=global_system_prompt,
+)
 
 current_session = sessions_by_id.get(st.session_state.active_session_id)
 current_preview_prompt = st.session_state.get("preview_prompt", True)
 previous_preview_prompt = st.session_state.get("previous_preview_prompt", current_preview_prompt)
-
-if prompt_templates:
-    if st.session_state.selected_prompt_template_id not in prompt_templates_by_id:
-        st.session_state.selected_prompt_template_id = prompt_templates[0].id
-
-if "create_session_confirming" not in st.session_state:
-    st.session_state.create_session_confirming = False
-
-if "global_system_prompt_draft" not in st.session_state:
-    st.session_state.global_system_prompt_draft = global_system_prompt
+sync_prompt_selection_state(st.session_state, prompt_templates_by_id)
 
 if current_session is None:
     st.error("未找到当前会话，请刷新页面重试。")
@@ -536,662 +146,47 @@ if current_session.model_config_id not in model_configs_by_id:
 selected_model_config = model_configs_by_id[current_session.model_config_id]
 
 legacy_system_prompt_input = st.session_state.pop("system_prompt_input", "")
-
-if st.session_state.system_prompt_session_id != current_session.id:
-    # 切换会话时，把输入框内容切到对应会话的提示词，避免上一条会话的内容覆盖当前会话。
-    st.session_state.system_prompt_draft = current_session.system_prompt
-    st.session_state.system_prompt_session_id = current_session.id
-    st.session_state.system_prompt_editor_nonce = 0
-else:
-    if "system_prompt_draft" not in st.session_state:
-        st.session_state.system_prompt_draft = legacy_system_prompt_input or current_session.system_prompt
-    if not current_preview_prompt and previous_preview_prompt:
-        # 从预览切回编辑时刷新编辑器 key，强制文本框以当前草稿重新初始化，避免旧组件状态把内容清空。
-        st.session_state.system_prompt_editor_nonce = st.session_state.get("system_prompt_editor_nonce", 0) + 1
-    elif current_preview_prompt and not previous_preview_prompt:
-        active_editor_key = st.session_state.get("system_prompt_editor_active_key")
-        if active_editor_key and active_editor_key in st.session_state:
-            st.session_state.system_prompt_draft = st.session_state[active_editor_key]
-    if current_preview_prompt and not st.session_state.system_prompt_draft and current_session.system_prompt:
-        st.session_state.system_prompt_draft = current_session.system_prompt
-
-st.session_state.previous_preview_prompt = current_preview_prompt
+sync_system_prompt_state(
+    state=st.session_state,
+    current_session=current_session,
+    current_preview_prompt=current_preview_prompt,
+    previous_preview_prompt=previous_preview_prompt,
+    legacy_system_prompt_input=legacy_system_prompt_input,
+)
 
 current_session_messages = list_session_messages(database_url, current_session.id)
-
-
-@st.dialog("确认删除模型配置", width="small")
-def render_delete_model_config_dialog(config_id: int) -> None:
-    current_config = model_configs_by_id.get(config_id)
-    if current_config is None:
-        st.session_state.delete_model_config_confirming_id = None
-        st.rerun()
-
-    st.write(f"确认删除模型配置“{current_config.name}”吗？删除后无法恢复。")
-    confirm_col, cancel_col = st.columns(2)
-
-    with confirm_col:
-        if st.button(
-            "确认删除",
-            type="primary",
-            use_container_width=True,
-            key=f"delete_model_config_confirm_{config_id}",
-        ):
-            try:
-                delete_model_config(database_url, config_id)
-                st.session_state.delete_model_config_confirming_id = None
-                st.rerun()
-            except ModelConfigStorageError as exc:
-                st.error(f"删除失败：{exc}")
-
-    with cancel_col:
-        if st.button(
-            "取消",
-            use_container_width=True,
-            key=f"delete_model_config_cancel_{config_id}",
-        ):
-            st.session_state.delete_model_config_confirming_id = None
-            st.rerun()
-
-
 if st.session_state.delete_model_config_confirming_id in model_configs_by_id:
-    render_delete_model_config_dialog(st.session_state.delete_model_config_confirming_id)
-
-
-@st.dialog("重命名会话", width="small")
-def render_rename_session_dialog(session_id: int) -> None:
-    session = get_session(database_url, session_id)
-    if session is None:
-        st.session_state.rename_session_confirming_id = None
-        st.rerun()
-
-    with st.form(f"rename_session_form_{session_id}"):
-        new_title = st.text_input("会话名称", value=session.title)
-        submitted = st.form_submit_button("保存名称", use_container_width=True)
-
-    if submitted:
-        if not new_title.strip():
-            st.error("会话名称不能为空。")
-        else:
-            try:
-                rename_session(database_url, session_id, new_title)
-                st.session_state.rename_session_confirming_id = None
-                st.rerun()
-            except SessionStorageError as exc:
-                st.error(f"重命名失败：{exc}")
-
-    if st.button("取消", key=f"cancel_rename_session_{session_id}", use_container_width=True):
-        st.session_state.rename_session_confirming_id = None
-        st.rerun()
+    render_delete_model_config_dialog(
+        database_url=database_url,
+        config_id=st.session_state.delete_model_config_confirming_id,
+        model_configs_by_id=model_configs_by_id,
+    )
 
 
 if st.session_state.rename_session_confirming_id in sessions_by_id:
-    render_rename_session_dialog(st.session_state.rename_session_confirming_id)
-
-
-@st.dialog("新建会话", width="small")
-def render_create_session_dialog() -> None:
-    with st.form("create_session_form"):
-        new_session_title = st.text_input("会话名称", placeholder="留空则自动生成")
-        new_session_model_config_id = st.selectbox(
-            "选择模型",
-            list(model_configs_by_id.keys()),
-            format_func=lambda config_id: model_config_label(model_configs_by_id[config_id]),
-        )
-        st.caption("新会话会默认使用全局默认提示词，创建后仍可按会话单独修改。")
-        submitted = st.form_submit_button("创建会话", use_container_width=True)
-
-    if submitted:
-        try:
-            new_session_id = create_session(
-                database_url,
-                title=new_session_title,
-                system_prompt=st.session_state.global_system_prompt_draft,
-                model_config_id=new_session_model_config_id,
-            )
-            st.session_state.pending_active_session_id = new_session_id
-            st.session_state.create_session_confirming = False
-            st.rerun()
-        except SessionStorageError as exc:
-            st.error(f"创建失败：{exc}")
-
-    if st.button("取消", key="cancel_create_session", use_container_width=True):
-        st.session_state.create_session_confirming = False
-        st.rerun()
+    render_rename_session_dialog(
+        database_url=database_url,
+        session_id=st.session_state.rename_session_confirming_id,
+    )
 
 
 if st.session_state.create_session_confirming:
-    render_create_session_dialog()
-
-
-@st.dialog("设置", width="large")
-def render_settings_dialog() -> None:
-    prompt_tab, model_tab = st.tabs(["提示词", "模型"])
-
-    with prompt_tab:
-        st.subheader("提示词")
-        current_prompt_tab, global_prompt_tab, template_library_tab = st.tabs(
-            ["当前会话", "全局默认", "模板库"]
-        )
-
-        with current_prompt_tab:
-            # 设置页同时承载预览和编辑，避免会话侧边栏混入模型行为配置。
-            preview_prompt = st.toggle(
-                "预览 Markdown",
-                value=st.session_state.get("preview_prompt", True),
-                key="preview_prompt",
-            )
-            st.caption("当前会话的系统提示词可单独修改，不影响其他会话。")
-
-            if not preview_prompt:
-                editor_key = (
-                    f"system_prompt_editor_{current_session.id}_"
-                    f"{st.session_state.get('system_prompt_editor_nonce', 0)}"
-                )
-                editor_value = st.text_area(
-                    "系统提示词",
-                    height=180,
-                    value=st.session_state.system_prompt_draft,
-                    key=editor_key,
-                )
-                st.session_state.system_prompt_editor_active_key = editor_key
-                st.session_state.system_prompt_draft = editor_value
-            elif st.session_state.system_prompt_draft.strip():
-                st.markdown(st.session_state.system_prompt_draft)
-            else:
-                st.caption("暂无内容")
-
-        with global_prompt_tab:
-            st.caption("新建会话会默认使用这里的系统提示词，后续每个会话仍可单独修改。")
-            with st.form("global_system_prompt_form"):
-                global_prompt_value = st.text_area(
-                    "全局默认系统提示词",
-                    height=180,
-                    value=st.session_state.global_system_prompt_draft,
-                )
-                global_prompt_submitted = st.form_submit_button("保存全局默认提示词", use_container_width=True)
-
-            if global_prompt_submitted:
-                try:
-                    update_global_system_prompt(database_url, global_prompt_value)
-                    st.session_state.global_system_prompt_draft = global_prompt_value.strip() or global_system_prompt
-                    st.success("全局默认提示词已保存。")
-                    st.rerun()
-                except AppSettingsStorageError as exc:
-                    st.error(f"保存失败：{exc}")
-
-        with template_library_tab:
-            st.caption("支持保存、编辑、复制和应用模板；占位符使用 `{{变量名}}` 格式。")
-
-            template_use_tab, template_new_tab = st.tabs(["使用模板", "新增模板"])
-
-            with template_use_tab:
-                if not prompt_templates:
-                    st.info("当前还没有可用模板，请先新增模板。")
-                else:
-                    selected_template_id = st.selectbox(
-                        "选择模板",
-                        list(prompt_templates_by_id.keys()),
-                        key="selected_prompt_template_id",
-                        format_func=lambda template_id: prompt_template_label(
-                            prompt_templates_by_id[template_id]
-                        ),
-                    )
-                    selected_template = prompt_templates_by_id[selected_template_id]
-                    template_variables = extract_template_variables(selected_template.content)
-
-                    if selected_template.description.strip():
-                        st.caption(selected_template.description)
-
-                    variable_values = {}
-                    if template_variables:
-                        st.markdown("**变量填写**")
-                        # 变量输入框按模板 ID 隔离，避免切换模板时把不同含义的值串在一起。
-                        for variable_name in template_variables:
-                            variable_values[variable_name] = st.text_input(
-                                variable_name,
-                                key=f"prompt_template_var_{selected_template.id}_{variable_name}",
-                            )
-                    else:
-                        st.caption("该模板没有变量占位符，可直接应用。")
-
-                    rendered_template_content = render_prompt_template(
-                        selected_template.content,
-                        variable_values,
-                    )
-                    missing_variables = [
-                        variable_name
-                        for variable_name in template_variables
-                        if not variable_values.get(variable_name, "").strip()
-                    ]
-
-                    st.text_area(
-                        "渲染预览",
-                        value=rendered_template_content,
-                        height=220,
-                        disabled=True,
-                    )
-                    if missing_variables:
-                        st.caption(
-                            "以下变量尚未填写，预览中会保留原占位符："
-                            + "、".join(missing_variables)
-                        )
-
-                    apply_current_col, apply_global_col, duplicate_col = st.columns(3)
-
-                    with apply_current_col:
-                        if st.button(
-                            "应用到当前会话",
-                            use_container_width=True,
-                            key=f"apply_template_current_{selected_template.id}",
-                        ):
-                            try:
-                                # 应用模板时同时更新数据库和编辑草稿，保证页面状态与持久化一致。
-                                update_session_system_prompt(
-                                    database_url,
-                                    current_session.id,
-                                    rendered_template_content,
-                                )
-                                st.session_state.system_prompt_draft = rendered_template_content
-                                st.session_state.preview_prompt = False
-                                st.success("已应用到当前会话。")
-                                st.rerun()
-                            except SessionStorageError as exc:
-                                st.error(f"应用失败：{exc}")
-
-                    with apply_global_col:
-                        if st.button(
-                            "设为全局默认",
-                            use_container_width=True,
-                            key=f"apply_template_global_{selected_template.id}",
-                        ):
-                            try:
-                                update_global_system_prompt(database_url, rendered_template_content)
-                                st.session_state.global_system_prompt_draft = rendered_template_content
-                                st.success("已更新全局默认提示词。")
-                                st.rerun()
-                            except AppSettingsStorageError as exc:
-                                st.error(f"应用失败：{exc}")
-
-                    with duplicate_col:
-                        if st.button(
-                            "复制为新模板",
-                            use_container_width=True,
-                            key=f"duplicate_template_{selected_template.id}",
-                        ):
-                            try:
-                                create_prompt_template(
-                                    database_url,
-                                    PromptTemplateInput(
-                                        name=build_template_copy_name(prompt_templates, selected_template.name),
-                                        description=selected_template.description,
-                                        content=selected_template.content,
-                                        builtin=False,
-                                    ),
-                                )
-                                st.success("模板已复制。")
-                                st.rerun()
-                            except DuplicatePromptTemplateName as exc:
-                                st.error(str(exc))
-                            except PromptTemplateStorageError as exc:
-                                st.error(f"复制失败：{exc}")
-
-                    st.divider()
-                    st.markdown("**编辑当前模板**")
-                    with st.form(f"edit_prompt_template_form_{selected_template.id}"):
-                        edit_template_name = st.text_input("模板名称", value=selected_template.name)
-                        edit_template_description = st.text_input(
-                            "模板说明",
-                            value=selected_template.description,
-                        )
-                        edit_template_content = st.text_area(
-                            "模板内容",
-                            value=selected_template.content,
-                            height=220,
-                        )
-                        edit_template_submitted = st.form_submit_button(
-                            "保存模板",
-                            use_container_width=True,
-                        )
-
-                    if edit_template_submitted:
-                        if not edit_template_name.strip() or not edit_template_content.strip():
-                            st.error("模板名称和模板内容不能为空。")
-                        else:
-                            try:
-                                update_prompt_template(
-                                    database_url,
-                                    selected_template.id,
-                                    PromptTemplateInput(
-                                        name=edit_template_name,
-                                        description=edit_template_description,
-                                        content=edit_template_content,
-                                        builtin=selected_template.builtin,
-                                    ),
-                                )
-                                st.success("模板已保存。")
-                                st.rerun()
-                            except DuplicatePromptTemplateName as exc:
-                                st.error(str(exc))
-                            except PromptTemplateStorageError as exc:
-                                st.error(f"保存失败：{exc}")
-
-                    if st.button(
-                        "删除当前模板",
-                        use_container_width=True,
-                        key=f"delete_prompt_template_{selected_template.id}",
-                    ):
-                        try:
-                            delete_prompt_template(database_url, selected_template.id)
-                            st.success("模板已删除。")
-                            st.rerun()
-                        except PromptTemplateStorageError as exc:
-                            st.error(f"删除失败：{exc}")
-
-            with template_new_tab:
-                with st.form("new_prompt_template_form"):
-                    new_template_name = st.text_input("模板名称", placeholder="例如：产品需求分析")
-                    new_template_description = st.text_input(
-                        "模板说明",
-                        placeholder="描述适用场景，便于后续选择。",
-                    )
-                    new_template_content = st.text_area(
-                        "模板内容",
-                        height=220,
-                        placeholder=(
-                            "你是一名产品分析助手。\n"
-                            "请围绕“{{产品名称}}”分析目标用户、核心痛点和改进建议。"
-                        ),
-                    )
-                    new_template_submitted = st.form_submit_button(
-                        "创建模板",
-                        use_container_width=True,
-                    )
-
-                if new_template_submitted:
-                    if not new_template_name.strip() or not new_template_content.strip():
-                        st.error("模板名称和模板内容不能为空。")
-                    else:
-                        try:
-                            create_prompt_template(
-                                database_url,
-                                build_prompt_template_input(
-                                    new_template_name,
-                                    new_template_description,
-                                    new_template_content,
-                                ),
-                            )
-                            st.success("模板已创建。")
-                            st.rerun()
-                        except DuplicatePromptTemplateName as exc:
-                            st.error(str(exc))
-                        except PromptTemplateStorageError as exc:
-                            st.error(f"创建失败：{exc}")
-
-    with model_tab:
-        st.subheader("模型")
-
-        session_model_selector_key = f"session_model_selector_{current_session.id}"
-        selected_model_config_id = st.selectbox(
-            "当前会话使用的模型",
-            list(model_configs_by_id.keys()),
-            index=list(model_configs_by_id.keys()).index(current_session.model_config_id),
-            key=session_model_selector_key,
-            format_func=lambda config_id: model_config_label(model_configs_by_id[config_id]),
-            help="每个会话会单独记住自己的模型配置。",
-        )
-        if selected_model_config_id != current_session.model_config_id:
-            try:
-                update_session_model_config(database_url, current_session.id, selected_model_config_id)
-                st.rerun()
-            except SessionStorageError as exc:
-                st.error(f"切换模型失败：{exc}")
-
-        current_config = model_configs_by_id[selected_model_config_id]
-        st.caption(
-            f"服务商：{current_config.provider or '未设置'} · "
-            f"Base URL：{current_config.base_url or '默认 OpenAI 地址'}"
-        )
-
-        edit_tab, new_tab = st.tabs(["编辑当前配置", "新增模型配置"])
-
-        with edit_tab:
-            with st.form("edit_model_config_form"):
-                edit_name = st.text_input("配置名称", value=current_config.name)
-                edit_provider = st.text_input("服务商", value=current_config.provider)
-                edit_api_key = st.text_input(
-                    "API Key",
-                    type="password",
-                    value=current_config.api_key,
-                    help="当前版本会保存到 PostgreSQL；正式部署建议改为加密存储。",
-                )
-                edit_base_url = st.text_input(
-                    "Base URL",
-                    value=current_config.base_url,
-                    placeholder="https://api.deepseek.com",
-                )
-                edit_model_name = st.text_input("模型", value=current_config.model_name)
-                edit_enabled = st.checkbox("启用此配置", value=current_config.enabled)
-                edit_temperature = st.slider(
-                    "温度",
-                    0.0,
-                    1.0,
-                    current_config.temperature,
-                    0.1,
-                    help="控制模型回复的随机性，数值越高越发散。",
-                )
-                edit_max_tokens = st.number_input(
-                    "最大输出 Token",
-                    min_value=1,
-                    max_value=32000,
-                    value=current_config.max_tokens,
-                    step=256,
-                )
-                edit_context_message_limit = st.number_input(
-                    "上下文消息数",
-                    min_value=1,
-                    max_value=200,
-                    value=current_config.context_message_limit,
-                    step=2,
-                )
-                edit_timeout_seconds = st.number_input(
-                    "请求超时（秒）",
-                    min_value=1.0,
-                    max_value=300.0,
-                    value=current_config.timeout_seconds,
-                    step=5.0,
-                )
-                edit_max_retries = st.number_input(
-                    "自动重试次数",
-                    min_value=0,
-                    max_value=10,
-                    value=current_config.max_retries,
-                    step=1,
-                )
-                edit_submitted = st.form_submit_button("保存当前配置", use_container_width=True)
-
-            if edit_submitted:
-                if not edit_name.strip() or not edit_model_name.strip():
-                    st.error("配置名称和模型不能为空。")
-                else:
-                    try:
-                        update_model_config(
-                            database_url,
-                            current_config.id,
-                            build_model_config_input(
-                                edit_name,
-                                edit_provider,
-                                edit_api_key,
-                                edit_base_url,
-                                edit_model_name,
-                                edit_temperature,
-                                edit_max_tokens,
-                                edit_context_message_limit,
-                                edit_timeout_seconds,
-                                edit_max_retries,
-                                edit_enabled,
-                            ),
-                        )
-                        st.success("模型配置已保存。")
-                        st.rerun()
-                    except DuplicateModelConfigName as exc:
-                        st.error(str(exc))
-                    except ModelConfigStorageError as exc:
-                        st.error(f"保存失败：{exc}")
-
-            if st.button(
-                "删除当前配置",
-                disabled=len(model_configs) <= 1,
-                use_container_width=True,
-                key=f"delete_model_config_trigger_{current_config.id}",
-            ):
-                st.session_state.delete_model_config_confirming_id = current_config.id
-                st.rerun()
-
-        with new_tab:
-            with st.form("new_model_config_form"):
-                new_name = st.text_input("配置名称", placeholder="OpenAI GPT-4.1")
-                new_provider = st.text_input("服务商", placeholder="OpenAI")
-                new_api_key = st.text_input(
-                    "API Key",
-                    type="password",
-                    placeholder="sk-xxxxxx",
-                    help="当前版本会保存到 PostgreSQL；正式部署建议改为加密存储。",
-                )
-                new_base_url = st.text_input("Base URL", placeholder="https://api.openai.com/v1")
-                new_model_name = st.text_input("模型", placeholder="gpt-4.1")
-                new_temperature = st.slider(
-                    "温度",
-                    0.0,
-                    1.0,
-                    0.7,
-                    0.1,
-                    key="new_temperature",
-                )
-                new_max_tokens = st.number_input(
-                    "最大输出 Token",
-                    min_value=1,
-                    max_value=32000,
-                    value=2048,
-                    step=256,
-                    key="new_max_tokens",
-                )
-                new_context_message_limit = st.number_input(
-                    "上下文消息数",
-                    min_value=1,
-                    max_value=200,
-                    value=20,
-                    step=2,
-                    key="new_context_message_limit",
-                )
-                new_timeout_seconds = st.number_input(
-                    "请求超时（秒）",
-                    min_value=1.0,
-                    max_value=300.0,
-                    value=60.0,
-                    step=5.0,
-                    key="new_timeout_seconds",
-                )
-                new_max_retries = st.number_input(
-                    "自动重试次数",
-                    min_value=0,
-                    max_value=10,
-                    value=2,
-                    step=1,
-                    key="new_max_retries",
-                )
-                new_submitted = st.form_submit_button("创建模型配置", use_container_width=True)
-
-            if new_submitted:
-                if not new_name.strip() or not new_model_name.strip():
-                    st.error("配置名称和模型不能为空。")
-                else:
-                    try:
-                        new_config_id = create_model_config(
-                            database_url,
-                            build_model_config_input(
-                                new_name,
-                                new_provider,
-                                new_api_key,
-                                new_base_url,
-                                new_model_name,
-                                new_temperature,
-                                new_max_tokens,
-                                new_context_message_limit,
-                                new_timeout_seconds,
-                                new_max_retries,
-                                True,
-                            ),
-                        )
-                        update_session_model_config(database_url, current_session.id, new_config_id)
-                        st.success("模型配置已创建。")
-                        st.rerun()
-                    except DuplicateModelConfigName as exc:
-                        st.error(str(exc))
-                    except ModelConfigStorageError as exc:
-                        st.error(f"创建失败：{exc}")
-
-        st.caption("模型配置保存到 PostgreSQL。配置停用或未填写 API Key 时，本轮对话会使用本地回显。")
+    render_create_session_dialog(
+        database_url=database_url,
+        model_configs_by_id=model_configs_by_id,
+        global_system_prompt_draft=st.session_state.global_system_prompt_draft,
+    )
 
 
 # ======== 侧边栏设置区域 ========
 
-with st.sidebar:
-    # with st.sidebar 表示：下面缩进的内容都显示在侧边栏
-
-    st.title("会话")
-    st.caption("选择、创建、重命名和导出对话。")
-
-    st.selectbox(
-        "当前会话",
-        list(sessions_by_id.keys()),
-        key="active_session_selector_id",
-        format_func=lambda session_id: sessions_by_id[session_id].title,
-    )
-
-    col_new, col_rename, col_del = st.columns(3)
-
-    with col_new:
-        if st.button("新建", use_container_width=True):
-            st.session_state.create_session_confirming = True
-            st.rerun()
-
-    with col_rename:
-        if st.button("重命名", use_container_width=True):
-            st.session_state.rename_session_confirming_id = st.session_state.active_session_id
-            st.rerun()
-
-    with col_del:
-        if st.button("删除", disabled=len(sessions) <= 1, use_container_width=True):
-            try:
-                deleting_session_id = st.session_state.active_session_id
-                delete_session(database_url, deleting_session_id)
-                remaining_sessions = list_sessions(database_url)
-                next_session_id = remaining_sessions[0].id if remaining_sessions else None
-                st.session_state.pending_active_session_id = next_session_id
-                st.rerun()
-            except SessionStorageError as exc:
-                st.error(f"删除失败：{exc}")
-
-    session_markdown = build_session_markdown(current_session, current_session_messages)
-    session_json = build_session_json(current_session, current_session_messages)
-
-    st.download_button(
-        "导出 Markdown",
-        data=session_markdown,
-        file_name=build_session_export_filename(current_session, "md"),
-        mime="text/markdown",
-        use_container_width=True,
-    )
-    st.download_button(
-        "导出 JSON",
-        data=session_json,
-        file_name=build_session_export_filename(current_session, "json"),
-        mime="application/json",
-        use_container_width=True,
-    )
-
-    st.caption(f"当前共有 {len(sessions)} 个会话。")
+render_sidebar(
+    database_url=database_url,
+    sessions=sessions,
+    sessions_by_id=sessions_by_id,
+    current_session=current_session,
+    current_session_messages=current_session_messages,
+)
 
 # ======== 当前会话消息 ========
 
@@ -1214,7 +209,15 @@ mode_label = "模型接口" if use_model_api else "本地回显"
 _, settings_col = st.columns([0.86, 0.14])
 with settings_col:
     if st.button("设置", use_container_width=True):
-        render_settings_dialog()
+        render_settings_dialog(
+            database_url=database_url,
+            current_session=current_session,
+            model_configs=model_configs,
+            model_configs_by_id=model_configs_by_id,
+            prompt_templates=prompt_templates,
+            prompt_templates_by_id=prompt_templates_by_id,
+            global_system_prompt=global_system_prompt,
+        )
 
 header_slot = st.empty()
 # 顶部状态需要在用户发送消息后即时重绘，所以先用占位容器承载。
