@@ -13,6 +13,10 @@ DEFAULT_TIMEOUT_SECONDS = 60.0
 DEFAULT_MAX_RETRIES = 2
 
 
+def get_app_secret_key() -> str:
+    return os.getenv("APP_SECRET_KEY", "")
+
+
 def load_dotenv_file(path: str | Path = ".env") -> bool:
     env_path = Path(path)
     if not env_path.exists() or not env_path.is_file():

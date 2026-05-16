@@ -10,7 +10,9 @@
 - 支持自定义系统提示词
 - 支持 Prompt 模板库，可保存、编辑、复制和应用模板，并支持 `{{变量名}}` 占位符渲染
 - 支持保存多个模型配置，并在页面中自由切换当前提问使用的模型
+- 支持模型服务商预设与连接测试，减少手动配置成本
 - 支持按模型配置保存 API Key、Base URL、模型名、temperature、最大输出 Token、上下文消息数、请求超时和自动重试
+- 支持使用 `APP_SECRET_KEY` 对已保存的模型 API Key 进行应用层对称加密
 - 支持 OpenAI SDK 流式输出
 - 支持 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_CHAT_MODEL` 等环境变量
 - 未启用接口或未安装依赖时，可使用本地回显模式
@@ -106,6 +108,12 @@ export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/ai_chat_demo"
 postgresql://postgres:postgres@localhost:5432/ai_chat_demo
 ```
 
+如需把保存到 PostgreSQL 的模型 API Key 以密文形式持久化，请额外配置：
+
+```bash
+export APP_SECRET_KEY="请替换成足够长的随机字符串"
+```
+
 首次启动时，应用会使用现有环境变量创建一条默认模型配置。
 
 方式一：通过环境变量配置：
@@ -124,16 +132,18 @@ streamlit run app.py
 方式二：在页面右上角“设置”弹窗中维护模型配置：
 
 - `配置名称`
+- `服务商预设`
 - `服务商`
 - `API Key`
 - `Base URL`
 - `模型`
 - `temperature`
 - 最大输出 Token、上下文消息数、请求超时、自动重试次数
+- `测试连接`
 
 配置停用或未填写 API Key 时，应用会自动使用本地回显模式。
 
-> 注意：当前版本面向本地 Demo，API Key 会明文保存在 PostgreSQL 中。正式部署时建议改为加密存储、环境变量注入或服务端密钥管理。
+> 注意：从当前版本开始，填写了 `APP_SECRET_KEY` 后，新保存的 API Key 会以密文形式写入 PostgreSQL；历史明文数据会在下次编辑保存时平滑迁移。正式部署仍建议结合环境变量注入或服务端密钥管理。
 
 ## 使用 Prompt 模板库
 
@@ -158,6 +168,7 @@ streamlit run app.py
 | `OPENAI_MAX_RETRIES` | SDK 自动重试次数 | `2` |
 | `APP_DATABASE_URL` | PostgreSQL 连接串 | `postgresql://postgres:postgres@localhost:5432/ai_chat_demo` |
 | `DATABASE_URL` | PostgreSQL 连接串，未设置 `APP_DATABASE_URL` 时使用 | 同上 |
+| `APP_SECRET_KEY` | API Key 加密主密钥 | 空 |
 
 ## 常见问题
 
@@ -167,7 +178,7 @@ streamlit run app.py
 
 ### 为什么勾选接口后返回鉴权失败？
 
-通常是 API Key 无效、Base URL 不正确，或者模型名称与服务商不匹配。请检查“设置”弹窗中的模型配置或环境变量。
+通常是 API Key 无效、Base URL 不正确，或者模型名称与服务商不匹配。请检查“设置”弹窗中的模型配置、服务商预设或环境变量；也可以先使用“测试连接”按钮快速验证。
 
 ### 聊天记录会保存吗？
 

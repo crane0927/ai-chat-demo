@@ -4,7 +4,7 @@ from db.connection import connect
 def init_model_config_db(database_url: str, error_cls: type[Exception]) -> None:
     with connect(database_url, error_cls) as connection:
         with connection.cursor() as cursor:
-            # PostgreSQL 负责保存模型配置；API Key 当前仍为 Demo 级明文存储，正式部署应改为加密或密钥管理服务。
+            # PostgreSQL 负责保存模型配置；API Key 由应用层加密后写入，表结构保持纯文本字段以兼容历史数据迁移。
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS model_configs (

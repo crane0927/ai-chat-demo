@@ -1,6 +1,10 @@
 import streamlit as st
 
 from services.app_settings import AppSettingsStorageError, update_global_system_prompt
+from services.model_connection import (
+    ModelConnectionTestError,
+    test_model_connection,
+)
 from services.model_config import (
     DuplicateModelConfigName,
     ModelConfigStorageError,
@@ -8,6 +12,7 @@ from services.model_config import (
     delete_model_config,
     update_model_config,
 )
+from services.model_presets import list_model_presets
 from services.prompt_template import (
     DuplicatePromptTemplateName,
     PromptTemplateInput,
@@ -28,6 +33,7 @@ from services.session import (
 )
 from utils.view_helpers import (
     build_model_config_input,
+    model_preset_label,
     build_prompt_template_input,
     build_template_copy_name,
     model_config_label,
@@ -436,6 +442,8 @@ def render_settings_dialog(
 
     with model_tab:
         st.subheader("模型")
+        model_presets = list_model_presets()
+        model_presets_by_key = {preset.key: preset for preset in model_presets}
 
         session_model_selector_key = f"session_model_selector_{current_session.id}"
         selected_model_config_id = st.selectbox(
@@ -469,13 +477,30 @@ def render_settings_dialog(
 
         with edit_tab:
             with st.form("edit_model_config_form"):
+                edit_preset_key = st.selectbox(
+                    "服务商预设",
+                    list(model_presets_by_key.keys()),
+                    key=f"edit_model_preset_{current_config.id}",
+                    format_func=lambda preset_key: model_preset_label(
+                        model_presets_by_key[preset_key]
+                    ),
+                    help="未填写的服务商、Base URL 和模型会自动套用预设默认值。",
+                )
+                selected_edit_preset = model_presets_by_key[edit_preset_key]
+                if edit_preset_key != "custom":
+                    st.caption(
+                        "预设默认值："
+                        f"{selected_edit_preset.provider} / "
+                        f"{selected_edit_preset.base_url} / "
+                        f"{selected_edit_preset.model_name}"
+                    )
                 edit_name = st.text_input("配置名称", value=current_config.name)
                 edit_provider = st.text_input("服务商", value=current_config.provider)
                 edit_api_key = st.text_input(
                     "API Key",
                     type="password",
                     value=current_config.api_key,
-                    help="当前版本会保存到 PostgreSQL；正式部署建议改为加密存储。",
+                    help="保存非空 API Key 前请先配置 APP_SECRET_KEY，数据库中会以密文形式持久化。",
                 )
                 edit_base_url = st.text_input(
                     "Base URL",
@@ -520,31 +545,49 @@ def render_settings_dialog(
                     value=current_config.max_retries,
                     step=1,
                 )
-                edit_submitted = st.form_submit_button(
-                    "保存当前配置", use_container_width=True
-                )
+                edit_test_col, edit_save_col = st.columns(2)
+                with edit_test_col:
+                    edit_test_submitted = st.form_submit_button(
+                        "测试连接", use_container_width=True
+                    )
+                with edit_save_col:
+                    edit_submitted = st.form_submit_button(
+                        "保存当前配置", use_container_width=True
+                    )
+
+            edit_model_input = build_model_config_input(
+                edit_name,
+                edit_provider,
+                edit_api_key,
+                edit_base_url,
+                edit_model_name,
+                edit_temperature,
+                edit_max_tokens,
+                edit_context_message_limit,
+                edit_timeout_seconds,
+                edit_max_retries,
+                edit_enabled,
+                preset_key=edit_preset_key,
+            )
+
+            if edit_test_submitted:
+                if not edit_model_input.model_name.strip():
+                    st.error("连接测试前请先填写模型，或选择带默认模型的服务商预设。")
+                else:
+                    try:
+                        st.success(test_model_connection(edit_model_input))
+                    except ModelConnectionTestError as exc:
+                        st.error(str(exc))
 
             if edit_submitted:
-                if not edit_name.strip() or not edit_model_name.strip():
+                if not edit_model_input.name.strip() or not edit_model_input.model_name.strip():
                     st.error("配置名称和模型不能为空。")
                 else:
                     try:
                         update_model_config(
                             database_url,
                             current_config.id,
-                            build_model_config_input(
-                                edit_name,
-                                edit_provider,
-                                edit_api_key,
-                                edit_base_url,
-                                edit_model_name,
-                                edit_temperature,
-                                edit_max_tokens,
-                                edit_context_message_limit,
-                                edit_timeout_seconds,
-                                edit_max_retries,
-                                edit_enabled,
-                            ),
+                            edit_model_input,
                         )
                         st.success("模型配置已保存。")
                         st.rerun()
@@ -564,13 +607,30 @@ def render_settings_dialog(
 
         with new_tab:
             with st.form("new_model_config_form"):
+                new_preset_key = st.selectbox(
+                    "服务商预设",
+                    list(model_presets_by_key.keys()),
+                    key="new_model_preset",
+                    format_func=lambda preset_key: model_preset_label(
+                        model_presets_by_key[preset_key]
+                    ),
+                    help="未填写的服务商、Base URL 和模型会自动套用预设默认值。",
+                )
+                selected_new_preset = model_presets_by_key[new_preset_key]
+                if new_preset_key != "custom":
+                    st.caption(
+                        "预设默认值："
+                        f"{selected_new_preset.provider} / "
+                        f"{selected_new_preset.base_url} / "
+                        f"{selected_new_preset.model_name}"
+                    )
                 new_name = st.text_input("配置名称", placeholder="OpenAI GPT-4.1")
                 new_provider = st.text_input("服务商", placeholder="OpenAI")
                 new_api_key = st.text_input(
                     "API Key",
                     type="password",
                     placeholder="sk-xxxxxx",
-                    help="当前版本会保存到 PostgreSQL；正式部署建议改为加密存储。",
+                    help="保存非空 API Key 前请先配置 APP_SECRET_KEY，数据库中会以密文形式持久化。",
                 )
                 new_base_url = st.text_input(
                     "Base URL", placeholder="https://api.openai.com/v1"
@@ -616,30 +676,48 @@ def render_settings_dialog(
                     step=1,
                     key="new_max_retries",
                 )
-                new_submitted = st.form_submit_button(
-                    "创建模型配置", use_container_width=True
-                )
+                new_test_col, new_create_col = st.columns(2)
+                with new_test_col:
+                    new_test_submitted = st.form_submit_button(
+                        "测试连接", use_container_width=True
+                    )
+                with new_create_col:
+                    new_submitted = st.form_submit_button(
+                        "创建模型配置", use_container_width=True
+                    )
+
+            new_model_input = build_model_config_input(
+                new_name,
+                new_provider,
+                new_api_key,
+                new_base_url,
+                new_model_name,
+                new_temperature,
+                new_max_tokens,
+                new_context_message_limit,
+                new_timeout_seconds,
+                new_max_retries,
+                True,
+                preset_key=new_preset_key,
+            )
+
+            if new_test_submitted:
+                if not new_model_input.model_name.strip():
+                    st.error("连接测试前请先填写模型，或选择带默认模型的服务商预设。")
+                else:
+                    try:
+                        st.success(test_model_connection(new_model_input))
+                    except ModelConnectionTestError as exc:
+                        st.error(str(exc))
 
             if new_submitted:
-                if not new_name.strip() or not new_model_name.strip():
+                if not new_model_input.name.strip() or not new_model_input.model_name.strip():
                     st.error("配置名称和模型不能为空。")
                 else:
                     try:
                         new_config_id = create_model_config(
                             database_url,
-                            build_model_config_input(
-                                new_name,
-                                new_provider,
-                                new_api_key,
-                                new_base_url,
-                                new_model_name,
-                                new_temperature,
-                                new_max_tokens,
-                                new_context_message_limit,
-                                new_timeout_seconds,
-                                new_max_retries,
-                                True,
-                            ),
+                            new_model_input,
                         )
                         update_session_model_config(
                             database_url, current_session.id, new_config_id
@@ -652,5 +730,5 @@ def render_settings_dialog(
                         st.error(f"创建失败：{exc}")
 
         st.caption(
-            "模型配置保存到 PostgreSQL。配置停用或未填写 API Key 时，本轮对话会使用本地回显。"
+            "模型配置保存到 PostgreSQL。配置停用或未填写 API Key 时，本轮对话会使用本地回显。保存非空 API Key 前请先配置 APP_SECRET_KEY。"
         )

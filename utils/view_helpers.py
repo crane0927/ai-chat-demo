@@ -1,4 +1,5 @@
 from services.model_config import ModelConfig, ModelConfigInput
+from services.model_presets import ModelPreset, resolve_model_identity
 from services.prompt_template import PromptTemplate, PromptTemplateInput
 
 
@@ -19,13 +20,20 @@ def build_model_config_input(
     timeout_seconds: float,
     max_retries: int,
     enabled: bool,
+    preset_key: str = "custom",
 ) -> ModelConfigInput:
-    return ModelConfigInput(
-        name=name,
+    resolved_provider, resolved_base_url, resolved_model_name = resolve_model_identity(
+        preset_key=preset_key,
         provider=provider,
-        api_key=api_key,
         base_url=base_url,
         model_name=model_name,
+    )
+    return ModelConfigInput(
+        name=name,
+        provider=resolved_provider,
+        api_key=api_key,
+        base_url=resolved_base_url,
+        model_name=resolved_model_name,
         temperature=float(temperature),
         max_tokens=int(max_tokens),
         context_message_limit=int(context_message_limit),
@@ -33,6 +41,10 @@ def build_model_config_input(
         max_retries=int(max_retries),
         enabled=enabled,
     )
+
+
+def model_preset_label(preset: ModelPreset) -> str:
+    return preset.label
 
 
 def prompt_template_label(template: PromptTemplate) -> str:
