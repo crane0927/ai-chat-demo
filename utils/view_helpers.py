@@ -40,7 +40,9 @@ def prompt_template_label(template: PromptTemplate) -> str:
     return f"{template.name}{builtin_label}"
 
 
-def build_prompt_template_input(name: str, description: str, content: str) -> PromptTemplateInput:
+def build_prompt_template_input(
+    name: str, description: str, content: str
+) -> PromptTemplateInput:
     return PromptTemplateInput(
         name=name,
         description=description,
@@ -49,7 +51,9 @@ def build_prompt_template_input(name: str, description: str, content: str) -> Pr
     )
 
 
-def build_template_copy_name(existing_templates: list[PromptTemplate], source_name: str) -> str:
+def build_template_copy_name(
+    existing_templates: list[PromptTemplate], source_name: str
+) -> str:
     existing_names = {template.name for template in existing_templates}
     if f"{source_name} 副本" not in existing_names:
         return f"{source_name} 副本"

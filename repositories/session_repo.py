@@ -108,7 +108,9 @@ def list_session_rows(database_url: str, error_cls: type[Exception]) -> list[dic
             return cursor.fetchall()
 
 
-def get_session_row(database_url: str, error_cls: type[Exception], session_id: int) -> dict | None:
+def get_session_row(
+    database_url: str, error_cls: type[Exception], session_id: int
+) -> dict | None:
     with connect(database_url, error_cls) as connection:
         with connection.cursor() as cursor:
             cursor.execute(

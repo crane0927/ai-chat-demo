@@ -75,7 +75,9 @@ def _row_to_model_config(row: Dict[str, Any]) -> ModelConfig:
 
 def ensure_default_model_config(database_url: str, api_key: str = "") -> None:
     def operation() -> None:
-        count = model_config_repo.count_model_configs(database_url, ModelConfigStorageError)
+        count = model_config_repo.count_model_configs(
+            database_url, ModelConfigStorageError
+        )
         if count:
             return
 
@@ -108,12 +110,16 @@ def ensure_default_model_config(database_url: str, api_key: str = "") -> None:
 
 
 def list_model_configs(database_url: str) -> List[ModelConfig]:
-    rows = model_config_repo.list_model_config_rows(database_url, ModelConfigStorageError)
+    rows = model_config_repo.list_model_config_rows(
+        database_url, ModelConfigStorageError
+    )
     return [_row_to_model_config(row) for row in rows]
 
 
 def get_model_config(database_url: str, config_id: int) -> Optional[ModelConfig]:
-    row = model_config_repo.get_model_config_row(database_url, ModelConfigStorageError, config_id)
+    row = model_config_repo.get_model_config_row(
+        database_url, ModelConfigStorageError, config_id
+    )
     return _row_to_model_config(row) if row else None
 
 
@@ -147,7 +153,9 @@ def create_model_config(database_url: str, config: ModelConfigInput) -> int:
     )
 
 
-def update_model_config(database_url: str, config_id: int, config: ModelConfigInput) -> None:
+def update_model_config(
+    database_url: str, config_id: int, config: ModelConfigInput
+) -> None:
     def operation() -> None:
         # 更新时间由数据库统一写入，便于以后做配置变更审计或按最近修改排序。
         model_config_repo.update_model_config(
@@ -180,7 +188,9 @@ def update_model_config(database_url: str, config_id: int, config: ModelConfigIn
 
 def delete_model_config(database_url: str, config_id: int) -> None:
     def operation() -> None:
-        model_config_repo.delete_model_config(database_url, ModelConfigStorageError, config_id)
+        model_config_repo.delete_model_config(
+            database_url, ModelConfigStorageError, config_id
+        )
 
     execute_write(
         operation=operation,

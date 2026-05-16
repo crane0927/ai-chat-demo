@@ -58,16 +58,20 @@ from state.session_state import (
     sync_prompt_selection_state,
     sync_system_prompt_state,
 )
-from ui.components import answer_source_html, render_app_header, render_assistant_message
+from ui.components import (
+    answer_source_html,
+    render_app_header,
+    render_assistant_message,
+)
 from ui.styles import inject_app_styles
 
 
 # ======== Streamlit 页面基础设置 ========
 
 st.set_page_config(
-    page_title=APP_TITLE,   # 浏览器标签页标题
-    page_icon="💬",         # 标签页图标
-    layout="wide"           # 页面宽屏显示
+    page_title=APP_TITLE,  # 浏览器标签页标题
+    page_icon="💬",  # 标签页图标
+    layout="wide",  # 页面宽屏显示
 )
 inject_app_styles()
 
@@ -124,7 +128,9 @@ ensure_base_state(
 
 current_session = sessions_by_id.get(st.session_state.active_session_id)
 current_preview_prompt = st.session_state.get("preview_prompt", True)
-previous_preview_prompt = st.session_state.get("previous_preview_prompt", current_preview_prompt)
+previous_preview_prompt = st.session_state.get(
+    "previous_preview_prompt", current_preview_prompt
+)
 sync_prompt_selection_state(st.session_state, prompt_templates_by_id)
 
 if current_session is None:
@@ -137,8 +143,12 @@ if current_session.model_config_id not in model_configs_by_id:
         st.error("未找到可用模型配置，请先在设置中创建模型。")
         st.stop()
     try:
-        update_session_model_config(database_url, current_session.id, default_model_config.id)
-        current_session = get_session(database_url, current_session.id) or current_session
+        update_session_model_config(
+            database_url, current_session.id, default_model_config.id
+        )
+        current_session = (
+            get_session(database_url, current_session.id) or current_session
+        )
     except SessionStorageError as exc:
         st.error(f"初始化会话模型失败：{exc}")
         st.stop()
@@ -191,11 +201,15 @@ render_sidebar(
 # ======== 当前会话消息 ========
 
 messages = current_session_messages
-system_prompt = st.session_state.system_prompt_draft.strip() or current_session.system_prompt
+system_prompt = (
+    st.session_state.system_prompt_draft.strip() or current_session.system_prompt
+)
 if system_prompt != current_session.system_prompt:
     try:
         update_session_system_prompt(database_url, current_session.id, system_prompt)
-        current_session = get_session(database_url, current_session.id) or current_session
+        current_session = (
+            get_session(database_url, current_session.id) or current_session
+        )
     except SessionStorageError as exc:
         st.error(f"保存提示词失败：{exc}")
         st.stop()
@@ -204,7 +218,9 @@ if system_prompt != current_session.system_prompt:
 # ======== 顶部状态区域 ========
 
 visible_messages = get_visible_messages(messages)
-use_model_api = bool(selected_model_config.enabled and selected_model_config.api_key.strip())
+use_model_api = bool(
+    selected_model_config.enabled and selected_model_config.api_key.strip()
+)
 mode_label = "模型接口" if use_model_api else "本地回显"
 _, settings_col = st.columns([0.86, 0.14])
 with settings_col:
@@ -243,7 +259,7 @@ if not visible_messages:
             <p>输入一个问题，或者先在设置中调整提示词和模型配置。</p>
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
 for msg in visible_messages:
@@ -308,7 +324,9 @@ if prompt:
     try:
         # 先保存用户消息，再保存助手回复，保证数据库中的顺序和页面展示一致。
         append_session_message(database_url, current_session.id, "user", prompt)
-        append_session_message(database_url, current_session.id, "assistant", answer, answer_source)
+        append_session_message(
+            database_url, current_session.id, "assistant", answer, answer_source
+        )
     except SessionStorageError as exc:
         st.error(f"保存聊天记录失败：{exc}")
         st.stop()

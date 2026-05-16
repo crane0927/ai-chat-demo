@@ -1,4 +1,3 @@
-from types import SimpleNamespace
 from unittest import mock
 import unittest
 
@@ -82,7 +81,10 @@ class LlmLogicTestCase(unittest.TestCase):
             timeout_seconds=30.0,
             max_retries=1,
         )
-        with mock.patch.object(llm, "OpenAI", object()), mock.patch.dict("os.environ", {}, clear=True):
+        with (
+            mock.patch.object(llm, "OpenAI", object()),
+            mock.patch.dict("os.environ", {}, clear=True),
+        ):
             result = list(
                 llm.openai_stream_response(
                     history=[{"role": "user", "content": "hi"}],

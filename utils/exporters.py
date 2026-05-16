@@ -60,6 +60,8 @@ def build_session_json(session: ChatSession, messages: list[ChatMessage]) -> str
 
 def build_session_export_filename(session: ChatSession, suffix: str) -> str:
     # 下载文件名只保留常见安全字符，避免不同系统下出现路径或编码问题。
-    safe_title = re.sub(r"[^\w\u4e00-\u9fff-]+", "-", session.title.strip(), flags=re.UNICODE)
+    safe_title = re.sub(
+        r"[^\w\u4e00-\u9fff-]+", "-", session.title.strip(), flags=re.UNICODE
+    )
     safe_title = safe_title.strip("-_") or f"session-{session.id}"
     return f"{safe_title}.{suffix}"

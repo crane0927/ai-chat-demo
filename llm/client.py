@@ -28,7 +28,9 @@ def openai_stream_response(
         yield "未安装 openai 依赖，已切换为本地回显模式。"
         return
 
-    resolved_api_key = (api_key or "").strip() or os.getenv("OPENAI_API_KEY", "").strip()
+    resolved_api_key = (api_key or "").strip() or os.getenv(
+        "OPENAI_API_KEY", ""
+    ).strip()
     if not resolved_api_key:
         yield "未检测到 OPENAI_API_KEY，已切换为本地回显模式。"
         return

@@ -95,7 +95,9 @@ def render_rename_session_dialog(database_url: str, session_id: int) -> None:
             except SessionStorageError as exc:
                 st.error(f"重命名失败：{exc}")
 
-    if st.button("取消", key=f"cancel_rename_session_{session_id}", use_container_width=True):
+    if st.button(
+        "取消", key=f"cancel_rename_session_{session_id}", use_container_width=True
+    ):
         st.session_state.rename_session_confirming_id = None
         st.rerun()
 
@@ -111,7 +113,9 @@ def render_create_session_dialog(
         new_session_model_config_id = st.selectbox(
             "选择模型",
             list(model_configs_by_id.keys()),
-            format_func=lambda config_id: model_config_label(model_configs_by_id[config_id]),
+            format_func=lambda config_id: model_config_label(
+                model_configs_by_id[config_id]
+            ),
         )
         st.caption("新会话会默认使用全局默认提示词，创建后仍可按会话单独修改。")
         submitted = st.form_submit_button("创建会话", use_container_width=True)
@@ -187,12 +191,16 @@ def render_settings_dialog(
                     height=180,
                     value=st.session_state.global_system_prompt_draft,
                 )
-                global_prompt_submitted = st.form_submit_button("保存全局默认提示词", use_container_width=True)
+                global_prompt_submitted = st.form_submit_button(
+                    "保存全局默认提示词", use_container_width=True
+                )
 
             if global_prompt_submitted:
                 try:
                     update_global_system_prompt(database_url, global_prompt_value)
-                    st.session_state.global_system_prompt_draft = global_prompt_value.strip() or global_system_prompt
+                    st.session_state.global_system_prompt_draft = (
+                        global_prompt_value.strip() or global_system_prompt
+                    )
                     st.success("全局默认提示词已保存。")
                     st.rerun()
                 except AppSettingsStorageError as exc:
@@ -216,7 +224,9 @@ def render_settings_dialog(
                         ),
                     )
                     selected_template = prompt_templates_by_id[selected_template_id]
-                    template_variables = extract_template_variables(selected_template.content)
+                    template_variables = extract_template_variables(
+                        selected_template.content
+                    )
 
                     if selected_template.description.strip():
                         st.caption(selected_template.description)
@@ -270,7 +280,9 @@ def render_settings_dialog(
                                     current_session.id,
                                     rendered_template_content,
                                 )
-                                st.session_state.system_prompt_draft = rendered_template_content
+                                st.session_state.system_prompt_draft = (
+                                    rendered_template_content
+                                )
                                 st.session_state.preview_prompt = False
                                 st.success("已应用到当前会话。")
                                 st.rerun()
@@ -284,8 +296,12 @@ def render_settings_dialog(
                             key=f"apply_template_global_{selected_template.id}",
                         ):
                             try:
-                                update_global_system_prompt(database_url, rendered_template_content)
-                                st.session_state.global_system_prompt_draft = rendered_template_content
+                                update_global_system_prompt(
+                                    database_url, rendered_template_content
+                                )
+                                st.session_state.global_system_prompt_draft = (
+                                    rendered_template_content
+                                )
                                 st.success("已更新全局默认提示词。")
                                 st.rerun()
                             except AppSettingsStorageError as exc:
@@ -301,7 +317,9 @@ def render_settings_dialog(
                                 create_prompt_template(
                                     database_url,
                                     PromptTemplateInput(
-                                        name=build_template_copy_name(prompt_templates, selected_template.name),
+                                        name=build_template_copy_name(
+                                            prompt_templates, selected_template.name
+                                        ),
                                         description=selected_template.description,
                                         content=selected_template.content,
                                         builtin=False,
@@ -317,7 +335,9 @@ def render_settings_dialog(
                     st.divider()
                     st.markdown("**编辑当前模板**")
                     with st.form(f"edit_prompt_template_form_{selected_template.id}"):
-                        edit_template_name = st.text_input("模板名称", value=selected_template.name)
+                        edit_template_name = st.text_input(
+                            "模板名称", value=selected_template.name
+                        )
                         edit_template_description = st.text_input(
                             "模板说明",
                             value=selected_template.description,
@@ -333,7 +353,10 @@ def render_settings_dialog(
                         )
 
                     if edit_template_submitted:
-                        if not edit_template_name.strip() or not edit_template_content.strip():
+                        if (
+                            not edit_template_name.strip()
+                            or not edit_template_content.strip()
+                        ):
                             st.error("模板名称和模板内容不能为空。")
                         else:
                             try:
@@ -368,7 +391,9 @@ def render_settings_dialog(
 
             with template_new_tab:
                 with st.form("new_prompt_template_form"):
-                    new_template_name = st.text_input("模板名称", placeholder="例如：产品需求分析")
+                    new_template_name = st.text_input(
+                        "模板名称", placeholder="例如：产品需求分析"
+                    )
                     new_template_description = st.text_input(
                         "模板说明",
                         placeholder="描述适用场景，便于后续选择。",
@@ -387,7 +412,10 @@ def render_settings_dialog(
                     )
 
                 if new_template_submitted:
-                    if not new_template_name.strip() or not new_template_content.strip():
+                    if (
+                        not new_template_name.strip()
+                        or not new_template_content.strip()
+                    ):
                         st.error("模板名称和模板内容不能为空。")
                     else:
                         try:
@@ -413,14 +441,20 @@ def render_settings_dialog(
         selected_model_config_id = st.selectbox(
             "当前会话使用的模型",
             list(model_configs_by_id.keys()),
-            index=list(model_configs_by_id.keys()).index(current_session.model_config_id),
+            index=list(model_configs_by_id.keys()).index(
+                current_session.model_config_id
+            ),
             key=session_model_selector_key,
-            format_func=lambda config_id: model_config_label(model_configs_by_id[config_id]),
+            format_func=lambda config_id: model_config_label(
+                model_configs_by_id[config_id]
+            ),
             help="每个会话会单独记住自己的模型配置。",
         )
         if selected_model_config_id != current_session.model_config_id:
             try:
-                update_session_model_config(database_url, current_session.id, selected_model_config_id)
+                update_session_model_config(
+                    database_url, current_session.id, selected_model_config_id
+                )
                 st.rerun()
             except SessionStorageError as exc:
                 st.error(f"切换模型失败：{exc}")
@@ -486,7 +520,9 @@ def render_settings_dialog(
                     value=current_config.max_retries,
                     step=1,
                 )
-                edit_submitted = st.form_submit_button("保存当前配置", use_container_width=True)
+                edit_submitted = st.form_submit_button(
+                    "保存当前配置", use_container_width=True
+                )
 
             if edit_submitted:
                 if not edit_name.strip() or not edit_model_name.strip():
@@ -536,7 +572,9 @@ def render_settings_dialog(
                     placeholder="sk-xxxxxx",
                     help="当前版本会保存到 PostgreSQL；正式部署建议改为加密存储。",
                 )
-                new_base_url = st.text_input("Base URL", placeholder="https://api.openai.com/v1")
+                new_base_url = st.text_input(
+                    "Base URL", placeholder="https://api.openai.com/v1"
+                )
                 new_model_name = st.text_input("模型", placeholder="gpt-4.1")
                 new_temperature = st.slider(
                     "温度",
@@ -578,7 +616,9 @@ def render_settings_dialog(
                     step=1,
                     key="new_max_retries",
                 )
-                new_submitted = st.form_submit_button("创建模型配置", use_container_width=True)
+                new_submitted = st.form_submit_button(
+                    "创建模型配置", use_container_width=True
+                )
 
             if new_submitted:
                 if not new_name.strip() or not new_model_name.strip():
@@ -601,7 +641,9 @@ def render_settings_dialog(
                                 True,
                             ),
                         )
-                        update_session_model_config(database_url, current_session.id, new_config_id)
+                        update_session_model_config(
+                            database_url, current_session.id, new_config_id
+                        )
                         st.success("模型配置已创建。")
                         st.rerun()
                     except DuplicateModelConfigName as exc:
@@ -609,4 +651,6 @@ def render_settings_dialog(
                     except ModelConfigStorageError as exc:
                         st.error(f"创建失败：{exc}")
 
-        st.caption("模型配置保存到 PostgreSQL。配置停用或未填写 API Key 时，本轮对话会使用本地回显。")
+        st.caption(
+            "模型配置保存到 PostgreSQL。配置停用或未填写 API Key 时，本轮对话会使用本地回显。"
+        )

@@ -43,7 +43,9 @@ def insert_default_prompt_templates(
             )
 
 
-def list_prompt_template_rows(database_url: str, error_cls: type[Exception]) -> list[dict]:
+def list_prompt_template_rows(
+    database_url: str, error_cls: type[Exception]
+) -> list[dict]:
     with connect(database_url, error_cls) as connection:
         with connection.cursor() as cursor:
             cursor.execute(

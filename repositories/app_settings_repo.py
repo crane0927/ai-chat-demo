@@ -1,7 +1,9 @@
 from db.connection import connect
 
 
-def init_app_settings_db(database_url: str, error_cls: type[Exception], default_system_prompt: str) -> None:
+def init_app_settings_db(
+    database_url: str, error_cls: type[Exception], default_system_prompt: str
+) -> None:
     with connect(database_url, error_cls) as connection:
         with connection.cursor() as cursor:
             # 全局应用设置集中存表，便于后续继续扩展默认提示词、主题或其他站点级配置。

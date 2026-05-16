@@ -17,7 +17,9 @@ def get_env_api_key() -> str:
 
 
 def get_database_url() -> str:
-    return os.getenv("APP_DATABASE_URL") or os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+    return os.getenv("APP_DATABASE_URL") or os.getenv(
+        "DATABASE_URL", DEFAULT_DATABASE_URL
+    )
 
 
 def get_env_base_url() -> str:
@@ -61,7 +63,9 @@ def get_env_max_tokens() -> int:
 
 
 def get_env_context_messages() -> int:
-    return _clamp_int(_get_int_env("OPENAI_CONTEXT_MESSAGES", DEFAULT_CONTEXT_MESSAGES), 1, 200)
+    return _clamp_int(
+        _get_int_env("OPENAI_CONTEXT_MESSAGES", DEFAULT_CONTEXT_MESSAGES), 1, 200
+    )
 
 
 def get_env_timeout_seconds() -> float:

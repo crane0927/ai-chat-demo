@@ -101,7 +101,9 @@ DEFAULT_PROMPT_TEMPLATES: List[PromptTemplateInput] = [
 
 
 def init_prompt_template_db(database_url: str) -> None:
-    prompt_template_repo.init_prompt_template_db(database_url, PromptTemplateStorageError)
+    prompt_template_repo.init_prompt_template_db(
+        database_url, PromptTemplateStorageError
+    )
 
 
 def ensure_default_prompt_templates(database_url: str) -> None:

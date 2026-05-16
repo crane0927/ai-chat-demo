@@ -55,6 +55,12 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+如需运行测试和代码检查，建议额外安装开发依赖：
+
+```bash
+pip install -r requirements-dev.txt
+```
+
 ## 运行项目
 
 先确认 PostgreSQL 数据库已创建，例如：
@@ -170,3 +176,54 @@ streamlit run app.py
 ## 开发建议
 
 后续优化和功能拓展已整理到 `docs/remaining-optimizations.md`。
+
+## 开发命令
+
+项目根目录已提供 `Makefile`，常用命令如下：
+
+```bash
+make dev
+make test
+make lint
+make format
+```
+
+如果你更习惯直接执行命令，也可以使用：
+
+```bash
+python -m pytest
+python -m ruff check .
+python -m ruff format .
+```
+
+## 本地启动与测试流程
+
+推荐按下面顺序进行本地开发：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+cp .env.example .env
+```
+
+然后根据你的本地 PostgreSQL 环境修改 `.env` 中的 `APP_DATABASE_URL`，并按需填写模型接口配置。
+
+数据库准备完成后，可以直接启动应用：
+
+```bash
+make dev
+```
+
+提交代码前，建议至少执行下面两步：
+
+```bash
+make test
+make lint
+```
+
+如果你只想快速验证某个配置模块，也可以直接运行：
+
+```bash
+.venv/bin/python -m unittest tests.test_config -v
+```

@@ -42,9 +42,15 @@ class ViewHelpersTestCase(unittest.TestCase):
 
     def test_build_template_copy_name_avoids_collisions(self) -> None:
         templates = [
-            PromptTemplate(id=1, name="模板", description="", content="", builtin=False),
-            PromptTemplate(id=2, name="模板 副本", description="", content="", builtin=False),
-            PromptTemplate(id=3, name="模板 副本 2", description="", content="", builtin=False),
+            PromptTemplate(
+                id=1, name="模板", description="", content="", builtin=False
+            ),
+            PromptTemplate(
+                id=2, name="模板 副本", description="", content="", builtin=False
+            ),
+            PromptTemplate(
+                id=3, name="模板 副本 2", description="", content="", builtin=False
+            ),
         ]
 
         self.assertEqual(build_template_copy_name(templates, "模板"), "模板 副本 3")

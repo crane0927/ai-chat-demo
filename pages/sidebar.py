@@ -35,7 +35,9 @@ def render_sidebar(
 
         with col_rename:
             if st.button("重命名", use_container_width=True):
-                st.session_state.rename_session_confirming_id = st.session_state.active_session_id
+                st.session_state.rename_session_confirming_id = (
+                    st.session_state.active_session_id
+                )
                 st.rerun()
 
         with col_del:
@@ -44,13 +46,17 @@ def render_sidebar(
                     deleting_session_id = st.session_state.active_session_id
                     delete_session(database_url, deleting_session_id)
                     remaining_sessions = list_sessions(database_url)
-                    next_session_id = remaining_sessions[0].id if remaining_sessions else None
+                    next_session_id = (
+                        remaining_sessions[0].id if remaining_sessions else None
+                    )
                     st.session_state.pending_active_session_id = next_session_id
                     st.rerun()
                 except SessionStorageError as exc:
                     st.error(f"删除失败：{exc}")
 
-        session_markdown = build_session_markdown(current_session, current_session_messages)
+        session_markdown = build_session_markdown(
+            current_session, current_session_messages
+        )
         session_json = build_session_json(current_session, current_session_messages)
 
         st.download_button(

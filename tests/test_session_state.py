@@ -48,7 +48,9 @@ class SessionStateTestCase(unittest.TestCase):
         self.assertEqual(state["system_prompt_session_id"], 2)
         self.assertEqual(state["system_prompt_editor_nonce"], 0)
 
-    def test_sync_system_prompt_state_reads_editor_value_when_switching_to_preview(self) -> None:
+    def test_sync_system_prompt_state_reads_editor_value_when_switching_to_preview(
+        self,
+    ) -> None:
         state = {
             "system_prompt_session_id": 3,
             "system_prompt_draft": "旧草稿",

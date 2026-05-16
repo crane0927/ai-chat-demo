@@ -105,7 +105,9 @@ def create_session(
     try:
         resolved_title = (title or "").strip()
         if not resolved_title:
-            existing_titles = session_repo.list_session_titles(database_url, SessionStorageError)
+            existing_titles = session_repo.list_session_titles(
+                database_url, SessionStorageError
+            )
             resolved_title = _build_default_session_title(existing_titles)
 
         return session_repo.create_session(
@@ -171,7 +173,9 @@ def update_session_model_config(
         raise SessionStorageError("保存会话模型失败。") from exc
 
 
-def ensure_session_model_config(database_url: str, fallback_model_config_id: int) -> None:
+def ensure_session_model_config(
+    database_url: str, fallback_model_config_id: int
+) -> None:
     try:
         session_repo.ensure_session_model_config(
             database_url,
@@ -194,7 +198,9 @@ def delete_session(database_url: str, session_id: int) -> None:
 
 
 def list_session_messages(database_url: str, session_id: int) -> List[ChatMessage]:
-    rows = session_repo.list_session_message_rows(database_url, SessionStorageError, session_id)
+    rows = session_repo.list_session_message_rows(
+        database_url, SessionStorageError, session_id
+    )
     return [_row_to_chat_message(row) for row in rows]
 
 
@@ -220,7 +226,9 @@ def append_session_message(
         raise SessionStorageError("保存聊天消息失败。") from exc
 
 
-def build_model_messages(system_prompt: str, messages: List[ChatMessage]) -> List[Message]:
+def build_model_messages(
+    system_prompt: str, messages: List[ChatMessage]
+) -> List[Message]:
     model_messages: List[Message] = [
         {"role": "system", "content": system_prompt.strip() or DEFAULT_SYSTEM_PROMPT}
     ]
