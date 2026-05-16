@@ -23,6 +23,7 @@ def openai_stream_response(
     not_found_error,
     bad_request_error,
     api_error,
+    error_handler=None,
 ) -> Iterator[str]:
     if openai_class is None:
         yield "未安装 openai 依赖，已切换为本地回显模式。"
@@ -58,6 +59,9 @@ def openai_stream_response(
             if delta:
                 yield delta
     except Exception as exc:
+        if error_handler is not None:
+            # 错误类型单独上报给页面和日志，避免上层只能从中文提示文案里反推异常类别。
+            error_handler(type(exc).__name__, exc)
         # 这里把 SDK 异常映射为稳定的中文文案，避免页面层理解不同服务商的异常细节。
         yield format_openai_error(
             exc,

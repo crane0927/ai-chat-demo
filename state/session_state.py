@@ -47,6 +47,9 @@ def ensure_base_state(
     if "global_system_prompt_draft" not in state:
         state["global_system_prompt_draft"] = global_system_prompt
 
+    if "last_request_observability" not in state:
+        state["last_request_observability"] = None
+
 
 def sync_prompt_selection_state(
     state: MutableMapping[str, Any],

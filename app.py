@@ -1,4 +1,5 @@
 import streamlit as st
+import time
 # streamlit 是用来快速写 Web 页面（特别适合 AI Demo）
 
 
@@ -26,12 +27,18 @@ from services.llm import (
     get_answer_source,
     local_fallback_response,
     openai_stream_response,
+    trim_model_messages,
 )
 from services.model_config import (
     ModelConfigStorageError,
     ensure_default_model_config,
     init_model_config_db,
     list_model_configs,
+)
+from services.observability import (
+    log_request_completed,
+    log_request_failed,
+    log_request_started,
 )
 from services.prompt_template import (
     PromptTemplateStorageError,
@@ -64,6 +71,7 @@ from ui.components import (
     render_assistant_message,
 )
 from ui.styles import inject_app_styles
+from utils.request_observability import RequestTelemetry, build_request_observability
 
 
 # ======== Streamlit 页面基础设置 ========
@@ -243,6 +251,7 @@ render_app_header(
     mode_label,
     selected_model_config.model_name,
     len(visible_messages),
+    st.session_state.get("last_request_observability"),
 )
 
 
@@ -294,10 +303,25 @@ if prompt:
     empty_state_slot.empty()
 
     conversation_messages = build_model_messages(system_prompt, messages)
+    request_messages = conversation_messages + [{"role": "user", "content": prompt}]
+    trimmed_request_messages = trim_model_messages(
+        request_messages,
+        selected_model_config.context_message_limit,
+    )
+    request_started_at = time.perf_counter()
+    request_error = {"type": ""}
 
     # 2. 显示用户消息
     with st.chat_message("user"):
         st.markdown(prompt)
+
+    log_request_started(
+        session_id=current_session.id,
+        model_name=selected_model_config.model_name,
+        mode_label=mode_label,
+        input_message_count=len(request_messages),
+        sent_message_count=len(trimmed_request_messages),
+    )
 
     # 3. 生成 AI 回复
     with st.chat_message("assistant"):
@@ -306,12 +330,15 @@ if prompt:
             answer_box = st.empty()
             answer = ""
             for chunk in openai_stream_response(
-                conversation_messages + [{"role": "user", "content": prompt}],
+                request_messages,
                 selected_model_config.temperature,
                 selected_model_config.api_key,
                 selected_model_config.model_name,
                 selected_model_config.base_url,
                 model_options,
+                error_handler=lambda error_type, _exc: request_error.__setitem__(
+                    "type", error_type
+                ),
             ):
                 answer += chunk
                 answer_box.markdown(answer)
@@ -320,6 +347,37 @@ if prompt:
         else:
             answer = local_fallback_response(prompt)
             render_assistant_message(answer, answer_source)
+
+    request_elapsed_seconds = time.perf_counter() - request_started_at
+    st.session_state.last_request_observability = build_request_observability(
+        RequestTelemetry(
+            elapsed_seconds=request_elapsed_seconds,
+            answer_source=answer_source,
+            input_message_count=len(request_messages),
+            sent_message_count=len(trimmed_request_messages),
+            error_type=request_error["type"],
+        )
+    )
+
+    if request_error["type"]:
+        log_request_failed(
+            session_id=current_session.id,
+            model_name=selected_model_config.model_name,
+            elapsed_seconds=request_elapsed_seconds,
+            error_type=request_error["type"],
+            error_message=answer,
+            input_message_count=len(request_messages),
+            sent_message_count=len(trimmed_request_messages),
+        )
+    else:
+        log_request_completed(
+            session_id=current_session.id,
+            model_name=selected_model_config.model_name,
+            elapsed_seconds=request_elapsed_seconds,
+            answer_source=answer_source,
+            input_message_count=len(request_messages),
+            sent_message_count=len(trimmed_request_messages),
+        )
 
     try:
         # 先保存用户消息，再保存助手回复，保证数据库中的顺序和页面展示一致。
@@ -338,4 +396,5 @@ if prompt:
         mode_label,
         selected_model_config.model_name,
         len(messages) + 2,
+        st.session_state.get("last_request_observability"),
     )

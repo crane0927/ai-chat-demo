@@ -84,6 +84,14 @@ APP_STYLES = """
         min-width: 18rem;
     }
 
+    .observability-strip {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: -0.4rem;
+        margin-bottom: 1.2rem;
+    }
+
     .status-pill {
         display: inline-flex;
         align-items: center;
@@ -215,6 +223,10 @@ APP_STYLES = """
         .status-strip {
             justify-content: flex-start;
             min-width: 0;
+        }
+
+        .observability-strip {
+            margin-top: -0.1rem;
         }
 
         .app-title {

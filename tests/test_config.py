@@ -1,6 +1,9 @@
 import os
+from pathlib import Path
+import tempfile
 from unittest import mock
 import unittest
+import importlib
 
 import config
 
@@ -35,6 +38,51 @@ class ConfigTestCase(unittest.TestCase):
     def test_get_env_max_retries_clamps_to_lower_bound(self) -> None:
         with mock.patch.dict(os.environ, {"OPENAI_MAX_RETRIES": "-5"}, clear=True):
             self.assertEqual(config.get_env_max_retries(), 0)
+
+    def test_load_dotenv_file_sets_missing_env_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_file = Path(temp_dir) / ".env"
+            env_file.write_text(
+                "OPENAI_API_KEY=dotenv-key\nOPENAI_CHAT_MODEL=dotenv-model\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict(os.environ, {}, clear=True):
+                loaded = config.load_dotenv_file(env_file)
+
+                self.assertTrue(loaded)
+                self.assertEqual(os.environ["OPENAI_API_KEY"], "dotenv-key")
+                self.assertEqual(os.environ["OPENAI_CHAT_MODEL"], "dotenv-model")
+
+    def test_load_dotenv_file_does_not_override_existing_env(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_file = Path(temp_dir) / ".env"
+            env_file.write_text("OPENAI_API_KEY=dotenv-key\n", encoding="utf-8")
+
+            with mock.patch.dict(
+                os.environ,
+                {"OPENAI_API_KEY": "shell-key"},
+                clear=True,
+            ):
+                config.load_dotenv_file(env_file)
+
+                self.assertEqual(os.environ["OPENAI_API_KEY"], "shell-key")
+
+    def test_import_loads_dotenv_from_current_working_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_file = Path(temp_dir) / ".env"
+            env_file.write_text("OPENAI_API_KEY=autoload-key\n", encoding="utf-8")
+            original_cwd = os.getcwd()
+
+            try:
+                os.chdir(temp_dir)
+                with mock.patch.dict(os.environ, {}, clear=True):
+                    importlib.reload(config)
+
+                    self.assertEqual(os.environ["OPENAI_API_KEY"], "autoload-key")
+            finally:
+                os.chdir(original_cwd)
+                importlib.reload(config)
 
 
 if __name__ == "__main__":

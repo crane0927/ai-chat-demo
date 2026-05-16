@@ -67,6 +67,7 @@ def openai_stream_response(
     model: str,
     base_url: str | None,
     options: ModelRequestOptions,
+    error_handler=None,
 ):
     return stream_openai_response(
         history=history,
@@ -84,6 +85,7 @@ def openai_stream_response(
         not_found_error=NotFoundError,
         bad_request_error=BadRequestError,
         api_error=APIError,
+        error_handler=error_handler,
     )
 
 

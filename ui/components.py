@@ -4,6 +4,7 @@ from typing import Optional
 import streamlit as st
 
 from config import APP_TITLE
+from utils.request_observability import RequestObservability
 
 
 def answer_source_html(source: Optional[str]) -> str:
@@ -22,10 +23,21 @@ def render_app_header(
     mode: str,
     model: str,
     message_count: int,
+    request_observability: Optional[RequestObservability] = None,
 ) -> None:
     safe_session_name = escape(session_name)
     safe_model_name = escape(model.strip() or "未设置模型")
     safe_mode_label = escape(mode)
+    observability_html = ""
+    if request_observability is not None:
+        observability_html = f"""
+            <div class="observability-strip">
+                <span class="status-pill">耗时 {escape(request_observability.elapsed_label)}</span>
+                <span class="status-pill">{escape(request_observability.context_label)}</span>
+                <span class="status-pill">{escape(request_observability.trim_label)}</span>
+                <span class="status-pill">{escape(request_observability.outcome_label)}</span>
+            </div>
+        """
 
     container.markdown(
         f"""
@@ -41,6 +53,7 @@ def render_app_header(
                 <span class="status-pill">{message_count} 条消息</span>
             </div>
         </section>
+        {observability_html}
         """,
         unsafe_allow_html=True,
     )

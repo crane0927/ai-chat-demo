@@ -98,6 +98,55 @@ class LlmLogicTestCase(unittest.TestCase):
 
         self.assertEqual(result, ["未检测到 OPENAI_API_KEY，已切换为本地回显模式。"])
 
+    def test_openai_stream_response_reports_error_type_via_callback(self) -> None:
+        class FakeStreamError(Exception):
+            pass
+
+        class FakeOpenAI:
+            def __init__(self, **kwargs) -> None:
+                self.chat = self
+                self.completions = self
+
+            def create(self, **kwargs):
+                raise FakeStreamError("boom")
+
+        options = llm.ModelRequestOptions(
+            max_tokens=100,
+            context_message_limit=10,
+            timeout_seconds=30.0,
+            max_retries=1,
+        )
+        captured_error_types: list[str] = []
+
+        with mock.patch.multiple(
+            llm,
+            OpenAI=FakeOpenAI,
+            AuthenticationError=None,
+            PermissionDeniedError=None,
+            RateLimitError=None,
+            APITimeoutError=None,
+            APIConnectionError=None,
+            NotFoundError=None,
+            BadRequestError=None,
+            APIError=None,
+        ):
+            result = list(
+                llm.openai_stream_response(
+                    history=[{"role": "user", "content": "hi"}],
+                    temp=0.7,
+                    api_key="sk-test",
+                    model="gpt-4.1",
+                    base_url=None,
+                    options=options,
+                    error_handler=lambda error_type, _: captured_error_types.append(
+                        error_type
+                    ),
+                )
+            )
+
+        self.assertEqual(captured_error_types, ["FakeStreamError"])
+        self.assertEqual(result, ["模型调用失败：boom"])
+
 
 if __name__ == "__main__":
     unittest.main()

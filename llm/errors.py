@@ -34,4 +34,4 @@ def format_openai_error(
     if api_error is not None and isinstance(exc, api_error):
         return f"模型服务异常：{exc}"
 
-    return f"请求失败：{type(exc).__name__} - {exc}"
+    return f"模型调用失败：{exc}"
