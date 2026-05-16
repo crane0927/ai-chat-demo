@@ -2,14 +2,8 @@ import json
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List
-
-
-try:
-    import psycopg
-    from psycopg.rows import dict_row
-except Exception:
-    psycopg = None
-    dict_row = None
+from db.errors import execute_write
+from repositories import prompt_template_repo
 
 
 class PromptTemplateStorageError(RuntimeError):
@@ -106,83 +100,41 @@ DEFAULT_PROMPT_TEMPLATES: List[PromptTemplateInput] = [
 ]
 
 
-def _connect(database_url: str):
-    if psycopg is None or dict_row is None:
-        raise PromptTemplateStorageError(
-            "未安装 PostgreSQL 驱动，请先执行：pip install -r requirements.txt"
-        )
-
-    try:
-        return psycopg.connect(database_url, row_factory=dict_row, connect_timeout=3)
-    except Exception as exc:
-        raise PromptTemplateStorageError(
-            "无法连接 PostgreSQL，请检查 APP_DATABASE_URL 或 DATABASE_URL。"
-        ) from exc
-
-
-def _is_unique_violation(exc: Exception) -> bool:
-    if psycopg is None:
-        return False
-    return isinstance(exc, psycopg.errors.UniqueViolation)
-
-
-def _execute_write(operation) -> Any:
-    try:
-        return operation()
-    except Exception as exc:
-        if _is_unique_violation(exc):
-            raise DuplicatePromptTemplateName("模板名称已存在，请换一个名称。") from exc
-        if isinstance(exc, PromptTemplateStorageError):
-            raise
-        raise PromptTemplateStorageError("提示词模板写入 PostgreSQL 失败。") from exc
-
-
 def init_prompt_template_db(database_url: str) -> None:
-    with _connect(database_url) as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS prompt_templates (
-                    id BIGSERIAL PRIMARY KEY,
-                    name TEXT NOT NULL UNIQUE,
-                    description TEXT NOT NULL DEFAULT '',
-                    content TEXT NOT NULL,
-                    builtin BOOLEAN NOT NULL DEFAULT FALSE,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
+    prompt_template_repo.init_prompt_template_db(database_url, PromptTemplateStorageError)
 
 
 def ensure_default_prompt_templates(database_url: str) -> None:
     def operation() -> None:
-        with _connect(database_url) as connection:
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT COUNT(*) AS total FROM prompt_templates")
-                total = cursor.fetchone()["total"]
-                if total:
-                    return
+        total = prompt_template_repo.count_prompt_templates(
+            database_url,
+            PromptTemplateStorageError,
+        )
+        if total:
+            return
 
-                # 首次初始化时注入常用模板，保证模板库开箱即可体验。
-                cursor.executemany(
-                    """
-                    INSERT INTO prompt_templates (name, description, content, builtin)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (name) DO NOTHING
-                    """,
-                    [
-                        (
-                            template.name,
-                            template.description,
-                            template.content,
-                            template.builtin,
-                        )
-                        for template in DEFAULT_PROMPT_TEMPLATES
-                    ],
+        # 首次初始化时注入常用模板，保证模板库开箱即可体验。
+        prompt_template_repo.insert_default_prompt_templates(
+            database_url,
+            PromptTemplateStorageError,
+            [
+                (
+                    template.name,
+                    template.description,
+                    template.content,
+                    template.builtin,
                 )
+                for template in DEFAULT_PROMPT_TEMPLATES
+            ],
+        )
 
-    _execute_write(operation)
+    execute_write(
+        operation=operation,
+        error_cls=PromptTemplateStorageError,
+        generic_message="提示词模板写入 PostgreSQL 失败。",
+        duplicate_error_cls=DuplicatePromptTemplateName,
+        duplicate_message="模板名称已存在，请换一个名称。",
+    )
 
 
 def _row_to_prompt_template(row: Dict[str, Any]) -> PromptTemplate:
@@ -196,39 +148,33 @@ def _row_to_prompt_template(row: Dict[str, Any]) -> PromptTemplate:
 
 
 def list_prompt_templates(database_url: str) -> List[PromptTemplate]:
-    with _connect(database_url) as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT id, name, description, content, builtin
-                FROM prompt_templates
-                ORDER BY builtin DESC, lower(name) ASC, id ASC
-                """
-            )
-            rows = cursor.fetchall()
+    rows = prompt_template_repo.list_prompt_template_rows(
+        database_url,
+        PromptTemplateStorageError,
+    )
     return [_row_to_prompt_template(row) for row in rows]
 
 
 def create_prompt_template(database_url: str, template: PromptTemplateInput) -> int:
     def operation() -> int:
-        with _connect(database_url) as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """
-                    INSERT INTO prompt_templates (name, description, content, builtin)
-                    VALUES (%s, %s, %s, %s)
-                    RETURNING id
-                    """,
-                    (
-                        template.name.strip(),
-                        template.description.strip(),
-                        template.content.strip(),
-                        template.builtin,
-                    ),
-                )
-                return int(cursor.fetchone()["id"])
+        return prompt_template_repo.create_prompt_template(
+            database_url,
+            PromptTemplateStorageError,
+            {
+                "name": template.name.strip(),
+                "description": template.description.strip(),
+                "content": template.content.strip(),
+                "builtin": template.builtin,
+            },
+        )
 
-    return _execute_write(operation)
+    return execute_write(
+        operation=operation,
+        error_cls=PromptTemplateStorageError,
+        generic_message="提示词模板写入 PostgreSQL 失败。",
+        duplicate_error_cls=DuplicatePromptTemplateName,
+        duplicate_message="模板名称已存在，请换一个名称。",
+    )
 
 
 def update_prompt_template(
@@ -237,38 +183,42 @@ def update_prompt_template(
     template: PromptTemplateInput,
 ) -> None:
     def operation() -> None:
-        with _connect(database_url) as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """
-                    UPDATE prompt_templates
-                    SET
-                        name = %s,
-                        description = %s,
-                        content = %s,
-                        builtin = %s,
-                        updated_at = NOW()
-                    WHERE id = %s
-                    """,
-                    (
-                        template.name.strip(),
-                        template.description.strip(),
-                        template.content.strip(),
-                        template.builtin,
-                        template_id,
-                    ),
-                )
+        prompt_template_repo.update_prompt_template(
+            database_url,
+            PromptTemplateStorageError,
+            template_id,
+            {
+                "name": template.name.strip(),
+                "description": template.description.strip(),
+                "content": template.content.strip(),
+                "builtin": template.builtin,
+            },
+        )
 
-    _execute_write(operation)
+    execute_write(
+        operation=operation,
+        error_cls=PromptTemplateStorageError,
+        generic_message="提示词模板写入 PostgreSQL 失败。",
+        duplicate_error_cls=DuplicatePromptTemplateName,
+        duplicate_message="模板名称已存在，请换一个名称。",
+    )
 
 
 def delete_prompt_template(database_url: str, template_id: int) -> None:
     def operation() -> None:
-        with _connect(database_url) as connection:
-            with connection.cursor() as cursor:
-                cursor.execute("DELETE FROM prompt_templates WHERE id = %s", (template_id,))
+        prompt_template_repo.delete_prompt_template(
+            database_url,
+            PromptTemplateStorageError,
+            template_id,
+        )
 
-    _execute_write(operation)
+    execute_write(
+        operation=operation,
+        error_cls=PromptTemplateStorageError,
+        generic_message="提示词模板写入 PostgreSQL 失败。",
+        duplicate_error_cls=DuplicatePromptTemplateName,
+        duplicate_message="模板名称已存在，请换一个名称。",
+    )
 
 
 def extract_template_variables(content: str) -> List[str]:
