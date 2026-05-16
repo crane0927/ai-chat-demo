@@ -39,6 +39,27 @@ class ConfigTestCase(unittest.TestCase):
         with mock.patch.dict(os.environ, {"OPENAI_MAX_RETRIES": "-5"}, clear=True):
             self.assertEqual(config.get_env_max_retries(), 0)
 
+    def test_get_rag_max_file_size_mb_uses_default_when_env_missing(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(
+                config.get_rag_max_file_size_mb(),
+                config.DEFAULT_RAG_MAX_FILE_SIZE_MB,
+            )
+
+    def test_get_rag_max_chunks_per_file_parses_env_value(self) -> None:
+        with mock.patch.dict(
+            os.environ, {"RAG_MAX_CHUNKS_PER_FILE": "123"}, clear=True
+        ):
+            self.assertEqual(config.get_rag_max_chunks_per_file(), 123)
+
+    def test_get_rag_top_k_clamps_invalid_large_value(self) -> None:
+        with mock.patch.dict(os.environ, {"RAG_TOP_K": "999"}, clear=True):
+            self.assertEqual(config.get_rag_top_k(), 20)
+
+    def test_get_rag_top_k_uses_default_for_invalid_value(self) -> None:
+        with mock.patch.dict(os.environ, {"RAG_TOP_K": "oops"}, clear=True):
+            self.assertEqual(config.get_rag_top_k(), config.DEFAULT_RAG_TOP_K)
+
     def test_load_dotenv_file_sets_missing_env_values(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             env_file = Path(temp_dir) / ".env"

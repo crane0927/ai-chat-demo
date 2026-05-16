@@ -12,6 +12,17 @@ def answer_source_html(source: Optional[str]) -> str:
     return f'<div class="answer-source-row"><span class="answer-source">回答来源：{safe_source}</span></div>'
 
 
+def info_card_html(title: str, body: str) -> str:
+    safe_title = escape(title)
+    safe_body = escape(body)
+    return (
+        '<section class="info-card">'
+        f'<p class="info-card-title">{safe_title}</p>'
+        f'<p class="info-card-body">{safe_body}</p>'
+        "</section>"
+    )
+
+
 def render_assistant_message(content: str, source: Optional[str]) -> None:
     st.markdown(content)
     st.markdown(answer_source_html(source), unsafe_allow_html=True)

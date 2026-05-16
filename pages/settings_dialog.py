@@ -1,6 +1,8 @@
 import streamlit as st
 
+from pages.knowledge_base_panel import render_knowledge_base_panel
 from services.app_settings import AppSettingsStorageError, update_global_system_prompt
+from services.knowledge_base import KnowledgeBaseStorageError
 from services.model_connection import (
     ModelConnectionTestError,
     test_model_connection,
@@ -155,7 +157,22 @@ def render_settings_dialog(
     prompt_templates_by_id: dict[int, object],
     global_system_prompt: str,
 ) -> None:
-    prompt_tab, model_tab = st.tabs(["提示词", "模型"])
+    knowledge_tab, prompt_tab, model_tab = st.tabs(["知识库", "提示词", "模型"])
+
+    with knowledge_tab:
+        try:
+            render_knowledge_base_panel(
+                database_url,
+                current_session=current_session,
+                selected_model_config=model_configs_by_id[
+                    current_session.model_config_id
+                ],
+                last_retrieved_knowledge_sources=st.session_state.get(
+                    "last_retrieved_knowledge_sources_by_session", {}
+                ).get(current_session.id, ""),
+            )
+        except KnowledgeBaseStorageError as exc:
+            st.error(f"知识库操作失败：{exc}")
 
     with prompt_tab:
         st.subheader("提示词")

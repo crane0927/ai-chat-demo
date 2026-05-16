@@ -1,10 +1,59 @@
 from unittest import mock
 import unittest
+from datetime import datetime
 
 from services import llm
+from services.session import ChatMessage, build_model_messages, merge_answer_sources
 
 
 class LlmLogicTestCase(unittest.TestCase):
+    def test_build_model_messages_appends_rag_context_when_hits_exist(self) -> None:
+        history = [
+            ChatMessage(
+                id=1,
+                session_id=1,
+                role="user",
+                content="用户问题",
+                source="",
+                sort_order=1,
+                created_at=datetime(2026, 5, 16, 12, 0, 0),
+            )
+        ]
+
+        result = build_model_messages("系统提示", history, rag_context="资料块")
+
+        self.assertIn("系统提示", result[0]["content"])
+        self.assertIn("## 参考资料", result[0]["content"])
+        self.assertIn("资料块", result[0]["content"])
+
+    def test_build_model_messages_keeps_plain_prompt_when_no_rag_context(self) -> None:
+        history = [
+            ChatMessage(
+                id=1,
+                session_id=1,
+                role="user",
+                content="用户问题",
+                source="",
+                sort_order=1,
+                created_at=datetime(2026, 5, 16, 12, 0, 0),
+            )
+        ]
+
+        result = build_model_messages("系统提示", history, rag_context="")
+
+        self.assertEqual(result[0]["content"], "系统提示")
+
+    def test_merge_answer_sources_combines_model_and_rag_sources(self) -> None:
+        result = merge_answer_sources(
+            "模型接口 · gpt-4.1",
+            "1. manual.md#1\n摘要：部署说明",
+        )
+
+        self.assertEqual(
+            result,
+            "模型接口 · gpt-4.1；参考资料：1. manual.md#1 / 摘要：部署说明",
+        )
+
     def test_clean_model_messages_filters_unknown_roles(self) -> None:
         history = [
             {"role": "system", "content": "s"},

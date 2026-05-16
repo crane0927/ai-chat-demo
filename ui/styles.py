@@ -200,6 +200,54 @@ APP_STYLES = """
         border: 1px solid var(--panel-border);
     }
 
+    .info-card {
+        margin: 0.5rem 0 1rem;
+        padding: 0.95rem 1rem;
+        border-radius: 8px;
+        border: 1px solid var(--panel-border);
+        background: color-mix(in srgb, var(--panel-bg) 92%, transparent);
+    }
+
+    .info-card-title {
+        margin: 0 0 0.35rem;
+        color: var(--text-main);
+        font-size: 0.9rem;
+        font-weight: 700;
+    }
+
+    .info-card-body {
+        margin: 0;
+        color: var(--text-muted);
+        font-size: 0.82rem;
+        line-height: 1.6;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .knowledge-file-item {
+        margin: 0 0 0.7rem;
+        padding: 0.85rem 0.95rem;
+        border-radius: 8px;
+        border: 1px solid var(--panel-border);
+        background: color-mix(in srgb, var(--panel-bg) 92%, transparent);
+    }
+
+    .knowledge-file-title {
+        color: var(--text-main);
+        font-size: 0.9rem;
+        font-weight: 700;
+        line-height: 1.5;
+    }
+
+    .knowledge-file-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.7rem;
+        margin-top: 0.35rem;
+        color: var(--text-muted);
+        font-size: 0.78rem;
+    }
+
     div[data-testid="stCheckbox"] {
         position: relative;
     }

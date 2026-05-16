@@ -24,6 +24,10 @@ class SessionStateTestCase(unittest.TestCase):
         self.assertEqual(state["active_session_selector_id"], 2)
         self.assertEqual(state["selected_prompt_template_id"], 10)
         self.assertEqual(state["global_system_prompt_draft"], "默认提示词")
+        self.assertEqual(state["last_retrieved_knowledge_context"], "")
+        self.assertEqual(state["last_retrieved_knowledge_sources"], "")
+        self.assertEqual(state["last_retrieved_knowledge_context_by_session"], {})
+        self.assertEqual(state["last_retrieved_knowledge_sources_by_session"], {})
 
     def test_sync_prompt_selection_state_falls_back_to_first_template(self) -> None:
         state = {"selected_prompt_template_id": 99}

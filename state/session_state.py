@@ -50,6 +50,18 @@ def ensure_base_state(
     if "last_request_observability" not in state:
         state["last_request_observability"] = None
 
+    if "last_retrieved_knowledge_context" not in state:
+        state["last_retrieved_knowledge_context"] = ""
+
+    if "last_retrieved_knowledge_sources" not in state:
+        state["last_retrieved_knowledge_sources"] = ""
+
+    if "last_retrieved_knowledge_context_by_session" not in state:
+        state["last_retrieved_knowledge_context_by_session"] = {}
+
+    if "last_retrieved_knowledge_sources_by_session" not in state:
+        state["last_retrieved_knowledge_sources_by_session"] = {}
+
 
 def sync_prompt_selection_state(
     state: MutableMapping[str, Any],

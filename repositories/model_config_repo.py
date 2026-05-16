@@ -14,6 +14,9 @@ def init_model_config_db(database_url: str, error_cls: type[Exception]) -> None:
                     api_key TEXT NOT NULL DEFAULT '',
                     base_url TEXT NOT NULL DEFAULT '',
                     model_name TEXT NOT NULL,
+                    embedding_api_key TEXT NOT NULL DEFAULT '',
+                    embedding_base_url TEXT NOT NULL DEFAULT '',
+                    embedding_model_name TEXT NOT NULL DEFAULT '',
                     temperature DOUBLE PRECISION NOT NULL DEFAULT 0.7,
                     max_tokens INTEGER NOT NULL,
                     context_message_limit INTEGER NOT NULL,
@@ -23,6 +26,15 @@ def init_model_config_db(database_url: str, error_cls: type[Exception]) -> None:
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
+                """
+            )
+            # 历史库可能已存在旧表结构，这里用增量字段补齐避免要求用户手动迁移。
+            cursor.execute(
+                """
+                ALTER TABLE model_configs
+                ADD COLUMN IF NOT EXISTS embedding_api_key TEXT NOT NULL DEFAULT '',
+                ADD COLUMN IF NOT EXISTS embedding_base_url TEXT NOT NULL DEFAULT '',
+                ADD COLUMN IF NOT EXISTS embedding_model_name TEXT NOT NULL DEFAULT ''
                 """
             )
 
@@ -49,6 +61,9 @@ def insert_default_model_config(
                     api_key,
                     base_url,
                     model_name,
+                    embedding_api_key,
+                    embedding_base_url,
+                    embedding_model_name,
                     temperature,
                     max_tokens,
                     context_message_limit,
@@ -56,7 +71,7 @@ def insert_default_model_config(
                     max_retries,
                     enabled
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (name) DO NOTHING
                 """,
                 (
@@ -65,6 +80,9 @@ def insert_default_model_config(
                     payload["api_key"],
                     payload["base_url"],
                     payload["model_name"],
+                    payload["embedding_api_key"],
+                    payload["embedding_base_url"],
+                    payload["embedding_model_name"],
                     payload["temperature"],
                     payload["max_tokens"],
                     payload["context_message_limit"],
@@ -87,6 +105,9 @@ def list_model_config_rows(database_url: str, error_cls: type[Exception]) -> lis
                     api_key,
                     base_url,
                     model_name,
+                    embedding_api_key,
+                    embedding_base_url,
+                    embedding_model_name,
                     temperature,
                     max_tokens,
                     context_message_limit,
@@ -116,6 +137,9 @@ def get_model_config_row(
                     api_key,
                     base_url,
                     model_name,
+                    embedding_api_key,
+                    embedding_base_url,
+                    embedding_model_name,
                     temperature,
                     max_tokens,
                     context_message_limit,
@@ -145,6 +169,9 @@ def create_model_config(
                     api_key,
                     base_url,
                     model_name,
+                    embedding_api_key,
+                    embedding_base_url,
+                    embedding_model_name,
                     temperature,
                     max_tokens,
                     context_message_limit,
@@ -152,7 +179,7 @@ def create_model_config(
                     max_retries,
                     enabled
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -161,6 +188,9 @@ def create_model_config(
                     payload["api_key"],
                     payload["base_url"],
                     payload["model_name"],
+                    payload["embedding_api_key"],
+                    payload["embedding_base_url"],
+                    payload["embedding_model_name"],
                     payload["temperature"],
                     payload["max_tokens"],
                     payload["context_message_limit"],
@@ -189,6 +219,9 @@ def update_model_config(
                     api_key = %s,
                     base_url = %s,
                     model_name = %s,
+                    embedding_api_key = %s,
+                    embedding_base_url = %s,
+                    embedding_model_name = %s,
                     temperature = %s,
                     max_tokens = %s,
                     context_message_limit = %s,
@@ -204,6 +237,9 @@ def update_model_config(
                     payload["api_key"],
                     payload["base_url"],
                     payload["model_name"],
+                    payload["embedding_api_key"],
+                    payload["embedding_base_url"],
+                    payload["embedding_model_name"],
                     payload["temperature"],
                     payload["max_tokens"],
                     payload["context_message_limit"],

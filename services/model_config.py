@@ -94,6 +94,9 @@ class ModelConfig:
     timeout_seconds: float
     max_retries: int
     enabled: bool
+    embedding_api_key: str = ""
+    embedding_base_url: str = ""
+    embedding_model_name: str = ""
 
 
 @dataclass(frozen=True)
@@ -109,6 +112,9 @@ class ModelConfigInput:
     timeout_seconds: float
     max_retries: int
     enabled: bool = True
+    embedding_api_key: str = ""
+    embedding_base_url: str = ""
+    embedding_model_name: str = ""
 
 
 def init_model_config_db(database_url: str) -> None:
@@ -129,6 +135,10 @@ def _row_to_model_config(row: Dict[str, Any]) -> ModelConfig:
         timeout_seconds=row["timeout_seconds"],
         max_retries=row["max_retries"],
         enabled=bool(row["enabled"]),
+        # Embedding 配置与聊天模型分离，便于后续按能力独立切换。
+        embedding_api_key=_decrypt_api_key_for_view(row.get("embedding_api_key", "")),
+        embedding_base_url=row.get("embedding_base_url", ""),
+        embedding_model_name=row.get("embedding_model_name", ""),
     )
 
 
@@ -161,6 +171,9 @@ def ensure_default_model_config(database_url: str, api_key: str = "") -> None:
                 "timeout_seconds": get_env_timeout_seconds(),
                 "max_retries": get_env_max_retries(),
                 "enabled": True,
+                "embedding_api_key": "",
+                "embedding_base_url": "",
+                "embedding_model_name": "",
             },
         )
 
@@ -205,6 +218,12 @@ def create_model_config(database_url: str, config: ModelConfigInput) -> int:
                 "timeout_seconds": config.timeout_seconds,
                 "max_retries": config.max_retries,
                 "enabled": config.enabled,
+                # Embedding API Key 复用现有加密链路，避免新增明文敏感字段。
+                "embedding_api_key": _encrypt_api_key_for_storage(
+                    config.embedding_api_key
+                ),
+                "embedding_base_url": config.embedding_base_url.strip(),
+                "embedding_model_name": config.embedding_model_name.strip(),
             },
         )
 
@@ -238,6 +257,11 @@ def update_model_config(
                 "timeout_seconds": config.timeout_seconds,
                 "max_retries": config.max_retries,
                 "enabled": config.enabled,
+                "embedding_api_key": _encrypt_api_key_for_storage(
+                    config.embedding_api_key
+                ),
+                "embedding_base_url": config.embedding_base_url.strip(),
+                "embedding_model_name": config.embedding_model_name.strip(),
             },
         )
 

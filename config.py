@@ -11,6 +11,9 @@ DEFAULT_MAX_TOKENS = 2048
 DEFAULT_CONTEXT_MESSAGES = 20
 DEFAULT_TIMEOUT_SECONDS = 60.0
 DEFAULT_MAX_RETRIES = 2
+DEFAULT_RAG_MAX_FILE_SIZE_MB = 10
+DEFAULT_RAG_MAX_CHUNKS_PER_FILE = 200
+DEFAULT_RAG_TOP_K = 4
 
 
 def get_app_secret_key() -> str:
@@ -108,3 +111,27 @@ def get_env_timeout_seconds() -> float:
 
 def get_env_max_retries() -> int:
     return _clamp_int(_get_int_env("OPENAI_MAX_RETRIES", DEFAULT_MAX_RETRIES), 0, 10)
+
+
+def get_rag_max_file_size_mb() -> int:
+    # 文件体积限制需要保留合理上限，避免超大文件在本地 Demo 中拖垮解析流程。
+    return _clamp_int(
+        _get_int_env("RAG_MAX_FILE_SIZE_MB", DEFAULT_RAG_MAX_FILE_SIZE_MB), 1, 100
+    )
+
+
+def get_rag_max_chunks_per_file() -> int:
+    # 分块数量限制用于兜住异常长文本，避免单文件生成过多片段影响性能。
+    return _clamp_int(
+        _get_int_env(
+            "RAG_MAX_CHUNKS_PER_FILE",
+            DEFAULT_RAG_MAX_CHUNKS_PER_FILE,
+        ),
+        1,
+        1000,
+    )
+
+
+def get_rag_top_k() -> int:
+    # 检索条数过大会显著放大上下文注入量，这里统一做边界收敛。
+    return _clamp_int(_get_int_env("RAG_TOP_K", DEFAULT_RAG_TOP_K), 1, 20)

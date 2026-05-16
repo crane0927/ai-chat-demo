@@ -227,14 +227,37 @@ def append_session_message(
 
 
 def build_model_messages(
-    system_prompt: str, messages: List[ChatMessage]
+    system_prompt: str,
+    messages: List[ChatMessage],
+    rag_context: str = "",
 ) -> List[Message]:
-    model_messages: List[Message] = [
-        {"role": "system", "content": system_prompt.strip() or DEFAULT_SYSTEM_PROMPT}
-    ]
+    prompt = system_prompt.strip() or DEFAULT_SYSTEM_PROMPT
+    normalized_rag_context = rag_context.strip()
+    if normalized_rag_context:
+        # RAG 资料放进 system prompt，可以让模型把召回片段当作“回答约束”而不是普通对话，
+        # 从而降低它把资料块误解为用户新问题、或在多轮里丢失参考边界的概率。
+        prompt = f"{prompt}\n\n## 参考资料\n{normalized_rag_context}"
+    # 没有命中时必须保持原始 prompt 不变，避免一次空检索把普通聊天行为偷偷改掉。
+    model_messages: List[Message] = [{"role": "system", "content": prompt}]
     for message in messages:
         model_messages.append({"role": message.role, "content": message.content})
     return model_messages
+
+
+def merge_answer_sources(base_source: str, rag_sources: str) -> str:
+    normalized_base_source = base_source.strip()
+    normalized_rag_sources = rag_sources.strip()
+    if not normalized_rag_sources:
+        return normalized_base_source
+
+    # 回答来源最终会进入单行展示区，这里先把多行 RAG 来源压平，保证页面和历史消息里都可读。
+    flattened_rag_sources = " / ".join(
+        line.strip() for line in normalized_rag_sources.splitlines() if line.strip()
+    )
+    rag_label = f"参考资料：{flattened_rag_sources}"
+    if not normalized_base_source:
+        return rag_label
+    return f"{normalized_base_source}；{rag_label}"
 
 
 def visible_messages(messages: List[ChatMessage]) -> List[ChatMessage]:

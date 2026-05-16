@@ -9,6 +9,7 @@ from config import (
     APP_TITLE,
     get_database_url,
     get_env_api_key,
+    get_rag_top_k,
 )
 from pages.settings_dialog import (
     render_create_session_dialog,
@@ -28,6 +29,11 @@ from services.llm import (
     local_fallback_response,
     openai_stream_response,
     trim_model_messages,
+)
+from services.knowledge_base import (
+    KnowledgeBaseStorageError,
+    init_knowledge_base_db,
+    retrieve_session_knowledge_context,
 )
 from services.model_config import (
     ModelConfigStorageError,
@@ -56,6 +62,7 @@ from services.session import (
     init_session_db,
     list_session_messages,
     list_sessions,
+    merge_answer_sources,
     update_session_model_config,
     update_session_system_prompt,
     visible_messages as get_visible_messages,
@@ -100,6 +107,7 @@ try:
     prompt_templates = list_prompt_templates(database_url)
     prompt_templates_by_id = {template.id: template for template in prompt_templates}
     init_session_db(database_url)
+    init_knowledge_base_db(database_url)
     ensure_default_session(
         database_url,
         default_model_config.id if default_model_config else None,
@@ -123,6 +131,10 @@ except ModelConfigStorageError as exc:
     st.stop()
 except PromptTemplateStorageError as exc:
     st.error(f"提示词模板数据库不可用：{exc}")
+    st.info("请确认 PostgreSQL 已启动，并设置 APP_DATABASE_URL 或 DATABASE_URL。")
+    st.stop()
+except KnowledgeBaseStorageError as exc:
+    st.error(f"知识库数据库不可用：{exc}")
     st.info("请确认 PostgreSQL 已启动，并设置 APP_DATABASE_URL 或 DATABASE_URL。")
     st.stop()
 
@@ -289,11 +301,47 @@ prompt = st.chat_input("请输入你的问题...")
 # ======== 主聊天逻辑 ========
 
 if prompt:
-    answer_source = get_answer_source(
+    base_answer_source = get_answer_source(
         use_model_api,
         selected_model_config.api_key,
         selected_model_config.model_name,
     )
+    rag_result = None
+    try:
+        rag_result = retrieve_session_knowledge_context(
+            database_url,
+            session_id=current_session.id,
+            query=prompt,
+            model_config=selected_model_config,
+            top_k=get_rag_top_k(),
+        )
+    except KnowledgeBaseStorageError as exc:
+        # 检索属于增强能力，失败时优先保证主聊天可用，而不是把整个会话链路一并阻断。
+        st.warning(f"知识库检索失败，已回退为普通聊天：{exc}")
+    if rag_result is None:
+        st.session_state.last_retrieved_knowledge_context = ""
+        st.session_state.last_retrieved_knowledge_sources = ""
+        st.session_state.last_retrieved_knowledge_context_by_session[
+            current_session.id
+        ] = ""
+        st.session_state.last_retrieved_knowledge_sources_by_session[
+            current_session.id
+        ] = ""
+        rag_context = ""
+        rag_sources = ""
+    else:
+        st.session_state.last_retrieved_knowledge_context = rag_result.context
+        st.session_state.last_retrieved_knowledge_sources = rag_result.sources
+        # 最近一次检索结果按会话单独保存，避免切换会话后把别的对话来源串到当前知识库面板。
+        st.session_state.last_retrieved_knowledge_context_by_session[
+            current_session.id
+        ] = rag_result.context
+        st.session_state.last_retrieved_knowledge_sources_by_session[
+            current_session.id
+        ] = rag_result.sources
+        rag_context = rag_result.context
+        rag_sources = rag_result.sources
+    answer_source = merge_answer_sources(base_answer_source, rag_sources)
     model_options = ModelRequestOptions(
         max_tokens=selected_model_config.max_tokens,
         context_message_limit=selected_model_config.context_message_limit,
@@ -302,7 +350,7 @@ if prompt:
     )
     empty_state_slot.empty()
 
-    conversation_messages = build_model_messages(system_prompt, messages)
+    conversation_messages = build_model_messages(system_prompt, messages, rag_context)
     request_messages = conversation_messages + [{"role": "user", "content": prompt}]
     trimmed_request_messages = trim_model_messages(
         request_messages,

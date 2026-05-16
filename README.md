@@ -13,6 +13,8 @@
 - 支持模型服务商预设与连接测试，减少手动配置成本
 - 支持按模型配置保存 API Key、Base URL、模型名、temperature、最大输出 Token、上下文消息数、请求超时和自动重试
 - 支持使用 `APP_SECRET_KEY` 对已保存的模型 API Key 进行应用层对称加密
+- 支持会话级 RAG 知识库问答，可上传 `Markdown / TXT / PDF` 文件并展示引用来源
+- 支持本地向量模式与远端 Embedding 双模式检索
 - 支持 OpenAI SDK 流式输出
 - 支持 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_CHAT_MODEL` 等环境变量
 - 未启用接口或未安装依赖时，可使用本地回显模式
@@ -155,6 +157,18 @@ streamlit run app.py
 - 一键应用到当前会话提示词，或设为全局默认提示词
 - 保存、编辑、复制、删除模板
 
+## 使用知识库问答
+
+在页面右上角“设置”弹窗中，进入“知识库”页签可以：
+
+- 上传 `Markdown / TXT / PDF` 文件到当前会话
+- 查看当前会话已绑定的知识文件、片段数和向量模式
+- 查看最近一次检索命中的引用来源摘要
+
+知识库文件只会绑定到当前会话，不会自动共享到其他会话。提问时系统会先检索当前会话绑定的资料，再把命中的参考片段注入模型上下文；如果没有命中，或检索阶段发生可恢复错误，会自动回退到普通聊天。
+
+默认情况下，知识库会使用本地向量模式工作；如果当前模型配置里补充了完整的远端 Embedding 配置，则新上传文件会按远端向量模式入库。
+
 ## 常用配置
 
 | 配置项 | 说明 | 默认值 |
@@ -169,6 +183,9 @@ streamlit run app.py
 | `APP_DATABASE_URL` | PostgreSQL 连接串 | `postgresql://postgres:postgres@localhost:5432/ai_chat_demo` |
 | `DATABASE_URL` | PostgreSQL 连接串，未设置 `APP_DATABASE_URL` 时使用 | 同上 |
 | `APP_SECRET_KEY` | API Key 加密主密钥 | 空 |
+| `RAG_MAX_FILE_SIZE_MB` | 单个知识文件允许上传的最大体积 | `10` |
+| `RAG_MAX_CHUNKS_PER_FILE` | 单个知识文件最多保留的分块数 | `200` |
+| `RAG_TOP_K` | 每次提问最多注入的检索片段数 | `4` |
 
 ## 常见问题
 

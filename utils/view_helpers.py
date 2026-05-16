@@ -21,6 +21,10 @@ def build_model_config_input(
     max_retries: int,
     enabled: bool,
     preset_key: str = "custom",
+    *,
+    embedding_api_key: str = "",
+    embedding_base_url: str = "",
+    embedding_model_name: str = "",
 ) -> ModelConfigInput:
     resolved_provider, resolved_base_url, resolved_model_name = resolve_model_identity(
         preset_key=preset_key,
@@ -40,6 +44,10 @@ def build_model_config_input(
         timeout_seconds=float(timeout_seconds),
         max_retries=int(max_retries),
         enabled=enabled,
+        # Embedding 字段先在 helper 入口透传，保证 UI/服务层共享同一份输入结构。
+        embedding_api_key=embedding_api_key,
+        embedding_base_url=embedding_base_url,
+        embedding_model_name=embedding_model_name,
     )
 
 
